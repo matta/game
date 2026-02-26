@@ -494,12 +494,30 @@ async fn main() {
 - **c) Architecture & Maintainability:** The generative arena memory management (`slotmap`) is in place. Crucially, the headless replay API and determinism contract are proven strong, meaning any future bug can be perfectly reproduced by copying the input journal.
 
 ## Milestone 2a — Basic Pathing & Interrupt Loop (10–12 hrs)
-- [ ] Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
-- [ ] Implement minimal frontier selection (nearest unknown-adjacent discovered tile).
-- [ ] Implement `AutoExploreIntent { target, reason, path_len }` as required core output.
-- [ ] Emit `LogEvent::AutoReasonChanged { reason, target, path_len }` whenever target/reason changes.
-- [ ] Render ASCII map and display event log in `app`.
-- [ ] Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
+- [ ] Add `core` test fixtures/helpers to build tiny discovered/walkable map layouts for pathing/frontier tests.
+- [ ] Implement deterministic neighbor expansion helper in fixed order: `Up, Right, Down, Left`.
+- [ ] Implement A* pathing over discovered known-walkable tiles only.
+- [ ] Add deterministic tie-break ordering inside A* open-set selection (`f`, then `h`, then `y`, then `x`).
+- [ ] Return `None` when no valid route exists to the selected frontier target.
+- [ ] Add unit test: straight-line path over discovered walkable tiles is found with expected length.
+- [ ] Add unit test: tie case chooses the deterministic first route (matching neighbor/tie ordering).
+- [ ] Add unit test: unknown or blocked tiles are never used by the generated path.
+- [ ] Add unit test: unreachable target yields no path and does not panic.
+- [ ] Implement frontier candidate collection: discovered tiles adjacent to at least one unknown tile.
+- [ ] Implement frontier selection: choose nearest candidate by path length, then deterministic `(y, x)` tie-break.
+- [ ] Add unit test: nearest frontier is selected when multiple candidates exist.
+- [ ] Add unit test: no frontier candidate results in a safe "exploration complete/stuck" outcome.
+- [ ] Populate `AutoExploreIntent { target, reason, path_len }` from current planner output.
+- [ ] Recompute intent only when target/reason/path actually changes.
+- [ ] Emit `LogEvent::AutoReasonChanged { reason, target, path_len }` exactly when intent changes.
+- [ ] Add unit test: unchanged intent across ticks does not emit duplicate reason-change log entries.
+- [ ] Render discovered map tiles and entities as ASCII glyphs in `app`.
+- [ ] Add a bounded event log panel in `app` and show newest events in stable order.
+- [ ] Display current auto-explore intent summary (`reason`, `target`, `path_len`) in UI debug text/log.
+- [ ] Implement keep/discard interrupt panel bound to stable item IDs.
+- [ ] Implement fight-vs-avoid interrupt panel bound to stable actor/encounter IDs.
+- [ ] Add integration test (or scripted harness) for loop: auto-explore -> interrupt -> choice -> resume.
+- [ ] Add deterministic smoke check for the milestone flow by replaying a fixed seed and asserting stable intent/log sequence.
 **Exit Criteria:**
 - **a) User Experience:** The player can watch a character automatically traverse a dungeon, pausing natively for rudimentary item, enemy, or choice pop-up panels. Intent tracing is visible in the UI event log.
 - **b) Progress toward vision:** The "One-Sentence Loop" (auto-explore, event interrupt) is visibly functioning (Vision 2.1).
