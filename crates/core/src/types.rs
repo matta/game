@@ -15,6 +15,7 @@ pub struct Pos {
 pub enum TileKind {
     Wall,
     Floor,
+    ClosedDoor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -34,6 +35,7 @@ pub enum Choice {
     DiscardLoot,
     Fight,
     Avoid,
+    OpenDoor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +48,7 @@ pub enum RunOutcome {
 pub enum Interrupt {
     LootFound { prompt_id: ChoicePromptId, item: ItemId },
     EnemyEncounter { prompt_id: ChoicePromptId, enemy: EntityId },
+    DoorBlocked { prompt_id: ChoicePromptId, pos: Pos },
 }
 
 #[derive(Clone, Debug)]
@@ -83,6 +86,7 @@ pub enum AutoReason {
     Loot,
     ThreatAvoidance,
     Stuck,
+    Door,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

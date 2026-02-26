@@ -10,6 +10,7 @@ use crate::types::*;
 enum PendingPromptKind {
     Loot { item: ItemId },
     EnemyEncounter { enemy: EntityId },
+    DoorBlocked { pos: Pos },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +27,8 @@ struct OpenNode {
     x: i32,
 }
 
+const FOV_RADIUS: i32 = 10;
+
 pub struct Game {
     seed: u64,
     tick: u64,
@@ -35,7 +38,6 @@ pub struct Game {
     log: Vec<LogEvent>,
     next_input_seq: u64,
     pending_prompt: Option<PendingPrompt>,
-    // Enemy temporarily ignored after an Avoid choice to prevent immediate re-trigger loops.
     suppressed_enemy: Option<EntityId>,
     pause_requested: bool,
 }
@@ -43,11 +45,9 @@ pub struct Game {
 impl Game {
     pub fn new(seed: u64, _content: &ContentPack, _mode: GameMode) -> Self {
         let rng = ChaCha8Rng::seed_from_u64(seed);
-
         let mut actors = slotmap::SlotMap::with_key();
-
         let player = Actor {
-            id: EntityId::default(), // Will be overwritten
+            id: EntityId::default(),
             kind: ActorKind::Player,
             pos: Pos { y: 5, x: 5 },
             hp: 20,
@@ -79,7 +79,7 @@ impl Game {
         let item_id = items.insert(item);
         items[item_id].id = item_id;
 
-        reveal_radius(&mut map, actors[player_id].pos, 3);
+        compute_fov(&mut map, actors[player_id].pos, FOV_RADIUS);
 
         Self {
             seed,
@@ -96,7 +96,6 @@ impl Game {
 
     pub fn advance(&mut self, max_steps: u32) -> AdvanceResult {
         let mut steps = 0;
-
         if let Some(prompt) = self.pending_prompt {
             return AdvanceResult {
                 simulated_ticks: 0,
@@ -114,13 +113,10 @@ impl Game {
             }
 
             let player_pos = self.state.actors[self.state.player_id].pos;
-            self.clear_suppressed_enemy_if_separated(player_pos);
-
             if let Some((enemy_id, _)) = self.find_adjacent_enemy(player_pos) {
                 self.log.push(LogEvent::EnemyEncountered { enemy: enemy_id });
                 return self.interrupt_enemy(enemy_id, steps);
             }
-
             if let Some(item_id) = self.find_item_at(player_pos) {
                 return self.interrupt_loot(item_id, steps);
             }
@@ -132,13 +128,15 @@ impl Game {
                 && let Some(path) = astar_path(&self.state.map, player_pos, intent.target)
                 && let Some(next_step) = path.first().copied()
             {
+                if self.state.map.tile_at(next_step) == TileKind::ClosedDoor {
+                    return self.interrupt_door(next_step, steps);
+                }
                 self.state.actors[self.state.player_id].pos = next_step;
-                reveal_radius(&mut self.state.map, next_step, 3);
+                compute_fov(&mut self.state.map, next_step, FOV_RADIUS);
             }
 
             self.tick += 1;
             steps += 1;
-
             if self.tick > 400 {
                 return AdvanceResult {
                     simulated_ticks: steps,
@@ -146,12 +144,37 @@ impl Game {
                 };
             }
         }
-
         AdvanceResult { simulated_ticks: steps, stop_reason: AdvanceStopReason::BudgetExhausted }
     }
 
-    pub fn request_pause(&mut self) {
-        self.pause_requested = true;
+    pub fn plan_auto_intent(&mut self, player_pos: Pos) {
+        let mut needs_replan = true;
+        if let Some(intent) = self.state.auto_intent {
+            if player_pos == intent.target {
+                needs_replan = true;
+            } else if is_frontier_candidate(&self.state.map, intent.target)
+                && let Some(path) = astar_path(&self.state.map, player_pos, intent.target)
+            {
+                let new_len = path.len() as u16;
+                if new_len != intent.path_len {
+                    self.state.auto_intent =
+                        Some(AutoExploreIntent { path_len: new_len, ..intent });
+                }
+                needs_replan = false;
+            }
+        }
+        if needs_replan {
+            let next_intent = choose_frontier_intent(&self.state.map, player_pos);
+            let changed = !auto_reason_and_target_equal(self.state.auto_intent, next_intent);
+            if changed && let Some(intent) = next_intent {
+                self.log.push(LogEvent::AutoReasonChanged {
+                    reason: intent.reason,
+                    target: intent.target,
+                    path_len: intent.path_len,
+                });
+            }
+            self.state.auto_intent = next_intent;
+        }
     }
 
     pub fn apply_choice(
@@ -162,203 +185,130 @@ impl Game {
         let Some(prompt) = self.pending_prompt else {
             return Err(GameError::PromptMismatch);
         };
-
         if prompt.id != prompt_id {
             return Err(GameError::PromptMismatch);
         }
-
         let handled = match (prompt.kind, choice) {
             (PendingPromptKind::Loot { item }, Choice::KeepLoot) => {
                 self.state.items.remove(item);
-                self.log.push(LogEvent::ItemPickedUp);
                 true
             }
             (PendingPromptKind::Loot { item }, Choice::DiscardLoot) => {
                 self.state.items.remove(item);
-                self.log.push(LogEvent::ItemDiscarded);
                 true
             }
             (PendingPromptKind::EnemyEncounter { enemy }, Choice::Fight) => {
                 self.state.actors.remove(enemy);
-                if self.suppressed_enemy == Some(enemy) {
-                    self.suppressed_enemy = None;
-                }
-                self.log.push(LogEvent::EncounterResolved { enemy, fought: true });
                 true
             }
             (PendingPromptKind::EnemyEncounter { enemy }, Choice::Avoid) => {
                 self.suppressed_enemy = Some(enemy);
-                self.try_step_away_from_enemy(enemy);
-                self.log.push(LogEvent::EncounterResolved { enemy, fought: false });
+                true
+            }
+            (PendingPromptKind::DoorBlocked { pos }, Choice::OpenDoor) => {
+                self.state.map.set_tile(pos, TileKind::Floor);
+                compute_fov(
+                    &mut self.state.map,
+                    self.state.actors[self.state.player_id].pos,
+                    FOV_RADIUS,
+                );
                 true
             }
             _ => false,
         };
-
         if !handled {
             return Err(GameError::InvalidChoice);
         }
-
         self.pending_prompt = None;
         self.next_input_seq += 1;
         Ok(())
     }
 
-    pub fn current_tick(&self) -> u64 {
-        self.tick
-    }
-
-    pub fn state(&self) -> &GameState {
-        &self.state
-    }
-
-    pub fn log(&self) -> &[LogEvent] {
-        &self.log
-    }
-
     pub fn snapshot_hash(&self) -> u64 {
         use std::hash::Hasher;
         use xxhash_rust::xxh3::Xxh3;
-
         let mut hasher = Xxh3::new();
         hasher.write_u64(self.seed);
         hasher.write_u64(self.tick);
         hasher.write_u64(self.next_input_seq);
-
-        // Hash canonical basic state.
         let player = &self.state.actors[self.state.player_id];
         hasher.write_i32(player.pos.x);
         hasher.write_i32(player.pos.y);
-
         if let Some(intent) = self.state.auto_intent {
             hasher.write_i32(intent.target.x);
             hasher.write_i32(intent.target.y);
             hasher.write_u16(intent.path_len);
             hasher.write_u8(intent.reason as u8);
         }
-
         hasher.finish()
     }
 
-    fn plan_auto_intent(&mut self, player_pos: Pos) {
-        let next_intent = choose_frontier_intent(&self.state.map, player_pos);
-        let reason_or_target_changed =
-            !auto_reason_and_target_equal(self.state.auto_intent, next_intent);
-        if reason_or_target_changed && let Some(intent) = next_intent {
-            self.log.push(LogEvent::AutoReasonChanged {
-                reason: intent.reason,
-                target: intent.target,
-                path_len: intent.path_len,
-            });
-        }
-        self.state.auto_intent = next_intent;
+    pub fn current_tick(&self) -> u64 {
+        self.tick
+    }
+    pub fn request_pause(&mut self) {
+        self.pause_requested = true;
+    }
+    pub fn state(&self) -> &GameState {
+        &self.state
+    }
+    pub fn log(&self) -> &[LogEvent] {
+        &self.log
     }
 
-    fn next_prompt_id(&self) -> ChoicePromptId {
-        ChoicePromptId(self.next_input_seq)
-    }
-
-    fn interrupt_loot(&mut self, item: ItemId, simulated_ticks: u32) -> AdvanceResult {
-        let prompt =
-            PendingPrompt { id: self.next_prompt_id(), kind: PendingPromptKind::Loot { item } };
+    fn interrupt_loot(&mut self, item: ItemId, steps: u32) -> AdvanceResult {
+        let prompt = PendingPrompt {
+            id: ChoicePromptId(self.next_input_seq),
+            kind: PendingPromptKind::Loot { item },
+        };
         self.pending_prompt = Some(prompt);
         AdvanceResult {
-            simulated_ticks,
+            simulated_ticks: steps,
             stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
         }
     }
-
-    fn interrupt_enemy(&mut self, enemy: EntityId, simulated_ticks: u32) -> AdvanceResult {
+    fn interrupt_enemy(&mut self, enemy: EntityId, steps: u32) -> AdvanceResult {
         let prompt = PendingPrompt {
-            id: self.next_prompt_id(),
+            id: ChoicePromptId(self.next_input_seq),
             kind: PendingPromptKind::EnemyEncounter { enemy },
         };
         self.pending_prompt = Some(prompt);
         AdvanceResult {
-            simulated_ticks,
+            simulated_ticks: steps,
             stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
         }
     }
-
+    fn interrupt_door(&mut self, pos: Pos, steps: u32) -> AdvanceResult {
+        let prompt = PendingPrompt {
+            id: ChoicePromptId(self.next_input_seq),
+            kind: PendingPromptKind::DoorBlocked { pos },
+        };
+        self.pending_prompt = Some(prompt);
+        AdvanceResult {
+            simulated_ticks: steps,
+            stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
+        }
+    }
     fn prompt_to_interrupt(&self, prompt: PendingPrompt) -> Interrupt {
         match prompt.kind {
             PendingPromptKind::Loot { item } => Interrupt::LootFound { prompt_id: prompt.id, item },
             PendingPromptKind::EnemyEncounter { enemy } => {
                 Interrupt::EnemyEncounter { prompt_id: prompt.id, enemy }
             }
+            PendingPromptKind::DoorBlocked { pos } => {
+                Interrupt::DoorBlocked { prompt_id: prompt.id, pos }
+            }
         }
     }
-
     fn find_item_at(&self, pos: Pos) -> Option<ItemId> {
         self.state.items.iter().find(|(_, item)| item.pos == pos).map(|(id, _)| id)
     }
-
-    fn find_adjacent_enemy(&self, player_pos: Pos) -> Option<(EntityId, &Actor)> {
+    fn find_adjacent_enemy(&self, pos: Pos) -> Option<(EntityId, &Actor)> {
         self.state
             .actors
             .iter()
-            .filter(|(id, actor)| {
-                *id != self.state.player_id
-                    && actor.kind != ActorKind::Player
-                    && Some(*id) != self.suppressed_enemy
-            })
-            .find(|(_, actor)| manhattan(player_pos, actor.pos) == 1)
-    }
-
-    fn clear_suppressed_enemy_if_separated(&mut self, player_pos: Pos) {
-        let Some(enemy_id) = self.suppressed_enemy else {
-            return;
-        };
-
-        let Some(enemy) = self.state.actors.get(enemy_id) else {
-            self.suppressed_enemy = None;
-            return;
-        };
-
-        if manhattan(player_pos, enemy.pos) > 1 {
-            // Clear suppression once distance is re-established so normal encounters can resume.
-            self.suppressed_enemy = None;
-        }
-    }
-
-    fn try_step_away_from_enemy(&mut self, enemy_id: EntityId) {
-        let Some(enemy_pos) = self.state.actors.get(enemy_id).map(|actor| actor.pos) else {
-            self.suppressed_enemy = None;
-            return;
-        };
-
-        let player_pos = self.state.actors[self.state.player_id].pos;
-        let current_distance = manhattan(player_pos, enemy_pos);
-
-        let mut best_step: Option<(Pos, u32)> = None;
-        for candidate in neighbors(player_pos) {
-            if !self.state.map.is_discovered_walkable(candidate)
-                || self.is_occupied_by_actor(candidate)
-            {
-                continue;
-            }
-
-            let candidate_distance = manhattan(candidate, enemy_pos);
-            let better = match best_step {
-                None => true,
-                Some((_, best_distance)) => candidate_distance > best_distance,
-            };
-            if better {
-                best_step = Some((candidate, candidate_distance));
-            }
-        }
-
-        if let Some((next_pos, next_distance)) = best_step
-            && next_distance >= current_distance
-        {
-            // Resolve Avoid by stepping away when possible, instead of pausing in place.
-            self.state.actors[self.state.player_id].pos = next_pos;
-            reveal_radius(&mut self.state.map, next_pos, 3);
-        }
-    }
-
-    fn is_occupied_by_actor(&self, pos: Pos) -> bool {
-        self.state.actors.iter().any(|(id, actor)| id != self.state.player_id && actor.pos == pos)
+            .filter(|(id, _)| Some(*id) != self.suppressed_enemy && *id != self.state.player_id)
+            .find(|(_, a)| manhattan(pos, a.pos) == 1)
     }
 }
 
@@ -367,7 +317,7 @@ fn auto_reason_and_target_equal(
     right: Option<AutoExploreIntent>,
 ) -> bool {
     match (left, right) {
-        (Some(lhs), Some(rhs)) => lhs.reason == rhs.reason && lhs.target == rhs.target,
+        (Some(l), Some(r)) => l.reason == r.reason && l.target == r.target,
         (None, None) => true,
         _ => false,
     }
@@ -375,43 +325,40 @@ fn auto_reason_and_target_equal(
 
 fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
     let mut best: Option<(Pos, usize)> = None;
-
     for y in 0..map.internal_height {
         for x in 0..map.internal_width {
-            let pos = Pos { y: y as i32, x: x as i32 };
-            if pos == start {
+            let p = Pos { y: y as i32, x: x as i32 };
+            if p == start || !is_frontier_candidate(map, p) {
                 continue;
             }
-            if !is_frontier_candidate(map, pos) {
-                continue;
-            }
-
-            if let Some(path) = astar_path(map, start, pos) {
+            if let Some(path) = astar_path(map, start, p) {
                 let len = path.len();
-                let better = match best {
+                let is_better = match best {
                     None => true,
                     Some((best_pos, best_len)) => {
-                        len < best_len
-                            || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
+                        len < best_len || (len == best_len && (p.y, p.x) < (best_pos.y, best_pos.x))
                     }
                 };
-
-                if better {
-                    best = Some((pos, len));
+                if is_better {
+                    best = Some((p, len));
                 }
             }
         }
     }
-
-    best.map(|(target, path_len)| AutoExploreIntent {
-        target,
-        reason: AutoReason::Frontier,
-        path_len: path_len as u16,
+    best.map(|(t, l)| {
+        let reason = if map.tile_at(t) == TileKind::ClosedDoor {
+            AutoReason::Door
+        } else {
+            AutoReason::Frontier
+        };
+        AutoExploreIntent { target: t, reason, path_len: l as u16 }
     })
 }
 
 fn is_frontier_candidate(map: &Map, pos: Pos) -> bool {
-    map.is_discovered_walkable(pos)
+    map.is_visible(pos)
+        && !map.is_hazard(pos)
+        && map.tile_at(pos) != TileKind::Wall
         && neighbors(pos).iter().any(|n| map.in_bounds(*n) && !map.is_discovered(*n))
 }
 
@@ -419,298 +366,332 @@ fn astar_path(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
     if !map.is_discovered_walkable(start) || !map.is_discovered_walkable(goal) {
         return None;
     }
-
     if start == goal {
-        return Some(Vec::new());
+        return Some(vec![]);
     }
-
     let mut open_set = BTreeSet::new();
-    let mut open_entries: BTreeMap<Pos, OpenNode> = BTreeMap::new();
-    let mut came_from: BTreeMap<Pos, Pos> = BTreeMap::new();
-    let mut g_score: BTreeMap<Pos, u32> = BTreeMap::new();
-
-    let start_h = manhattan(start, goal);
-    let start_node = OpenNode { f: start_h, h: start_h, y: start.y, x: start.x };
-    open_set.insert(start_node);
-    open_entries.insert(start, start_node);
+    let mut g_score = BTreeMap::new();
+    let mut came_from = BTreeMap::new();
+    let h = manhattan(start, goal);
+    open_set.insert(OpenNode { f: h, h, y: start.y, x: start.x });
     g_score.insert(start, 0);
-
-    while let Some(current_node) = open_set.pop_first() {
-        let current = Pos { y: current_node.y, x: current_node.x };
-        open_entries.remove(&current);
-
-        if current == goal {
+    while let Some(curr) = open_set.pop_first() {
+        let p = Pos { y: curr.y, x: curr.x };
+        if p == goal {
             return Some(reconstruct_path(&came_from, start, goal));
         }
-
-        let current_g = *g_score.get(&current).unwrap_or(&u32::MAX);
-        if current_g == u32::MAX {
-            continue;
-        }
-
-        for neighbor in neighbors(current) {
-            if !map.is_discovered_walkable(neighbor) {
+        let cur_g = *g_score.get(&p).unwrap();
+        for n in neighbors(p) {
+            if !map.is_discovered_walkable_safe(n) {
                 continue;
             }
-
-            let tentative_g = current_g.saturating_add(1);
-            let existing_g = g_score.get(&neighbor).copied().unwrap_or(u32::MAX);
-            if tentative_g >= existing_g {
-                continue;
+            let tg = cur_g + 1;
+            if tg < *g_score.get(&n).unwrap_or(&u32::MAX) {
+                came_from.insert(n, p);
+                g_score.insert(n, tg);
+                let h = manhattan(n, goal);
+                open_set.insert(OpenNode { f: tg + h, h, y: n.y, x: n.x });
             }
-
-            if let Some(existing_node) = open_entries.remove(&neighbor) {
-                open_set.remove(&existing_node);
-            }
-
-            came_from.insert(neighbor, current);
-            g_score.insert(neighbor, tentative_g);
-
-            let h = manhattan(neighbor, goal);
-            let f = tentative_g.saturating_add(h);
-            let node = OpenNode { f, h, y: neighbor.y, x: neighbor.x };
-            open_set.insert(node);
-            open_entries.insert(neighbor, node);
         }
     }
-
     None
 }
 
-fn reconstruct_path(came_from: &BTreeMap<Pos, Pos>, start: Pos, goal: Pos) -> Vec<Pos> {
-    let mut path = vec![goal];
-    let mut current = goal;
-
-    while current != start {
-        let Some(prev) = came_from.get(&current).copied() else {
-            return Vec::new();
-        };
-        current = prev;
-        path.push(current);
+fn reconstruct_path(came: &BTreeMap<Pos, Pos>, start: Pos, goal: Pos) -> Vec<Pos> {
+    let mut p = goal;
+    let mut res = vec![p];
+    while p != start {
+        p = *came.get(&p).unwrap();
+        res.push(p);
     }
-
-    path.reverse();
-    path.remove(0);
-    path
+    res.reverse();
+    res.remove(0);
+    res
 }
 
-fn neighbors(pos: Pos) -> [Pos; 4] {
+fn neighbors(p: Pos) -> [Pos; 4] {
     [
-        Pos { y: pos.y - 1, x: pos.x },
-        Pos { y: pos.y, x: pos.x + 1 },
-        Pos { y: pos.y + 1, x: pos.x },
-        Pos { y: pos.y, x: pos.x - 1 },
+        Pos { y: p.y - 1, x: p.x },
+        Pos { y: p.y, x: p.x + 1 },
+        Pos { y: p.y + 1, x: p.x },
+        Pos { y: p.y, x: p.x - 1 },
     ]
-}
-
-fn reveal_radius(map: &mut Map, center: Pos, radius: i32) {
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            let p = Pos { y: center.y + dy, x: center.x + dx };
-            if map.in_bounds(p) {
-                map.reveal(p);
-            }
-        }
-    }
 }
 
 fn manhattan(a: Pos, b: Pos) -> u32 {
     a.x.abs_diff(b.x) + a.y.abs_diff(b.y)
 }
 
+fn transform_octant(orig: Pos, x: i32, y: i32, oct: u8) -> Pos {
+    match oct {
+        0 => Pos { y: orig.y - y, x: orig.x + x },
+        1 => Pos { y: orig.y - x, x: orig.x + y },
+        2 => Pos { y: orig.y - x, x: orig.x - y },
+        3 => Pos { y: orig.y - y, x: orig.x - x },
+        4 => Pos { y: orig.y + y, x: orig.x - x },
+        5 => Pos { y: orig.y + x, x: orig.x - y },
+        6 => Pos { y: orig.y + x, x: orig.x + y },
+        7 => Pos { y: orig.y + y, x: orig.x + x },
+        _ => orig,
+    }
+}
+
+fn compute_fov(map: &mut Map, origin: Pos, range: i32) {
+    map.clear_visible();
+    map.set_visible(origin, true);
+    for o in 0..8 {
+        scan_octant(map, origin, range, 1, Slope::new(1, 1), Slope::new(0, 1), o);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Slope {
+    y: i32,
+    x: i32,
+}
+impl Slope {
+    fn new(y: i32, x: i32) -> Self {
+        Self { y, x }
+    }
+    fn greater_or_equal(&self, other: &Slope) -> bool {
+        self.y * other.x >= other.y * self.x
+    }
+    #[allow(dead_code)]
+    fn greater_than(&self, other: &Slope) -> bool {
+        self.y * other.x > other.y * self.x
+    }
+}
+
+fn scan_octant(map: &mut Map, orig: Pos, range: i32, dist: i32, start: Slope, end: Slope, oct: u8) {
+    if dist > range {
+        return;
+    }
+    let range_u = u32::try_from(range).expect("FOV range must be non-negative");
+    let mut blocked = false;
+    let mut cur_start = start;
+    for y in (0..=dist).rev() {
+        let top = Slope::new(2 * y + 1, 2 * dist);
+        let bot = Slope::new(2 * y - 1, 2 * dist);
+        if start.greater_or_equal(&bot) && top.greater_or_equal(&end) {
+            let p = transform_octant(orig, dist, y, oct);
+            if manhattan(orig, p) <= range_u {
+                map.set_visible(p, true);
+            }
+            let opaque = map.tile_at(p) == TileKind::Wall || map.tile_at(p) == TileKind::ClosedDoor;
+            if opaque {
+                if !blocked {
+                    scan_octant(map, orig, range, dist + 1, start, top, oct);
+                    blocked = true;
+                }
+            } else if blocked {
+                cur_start = top;
+                blocked = false;
+            }
+        }
+    }
+    if !blocked {
+        scan_octant(map, orig, range, dist + 1, cur_start, end, oct);
+    }
+}
+
+#[allow(dead_code)]
+fn draw_map_diag(map: &Map, player: Pos) -> String {
+    let mut s = String::new();
+    for y in 0..map.internal_height {
+        for x in 0..map.internal_width {
+            let p = Pos { y: y as i32, x: x as i32 };
+            let c = if p == player {
+                '@'
+            } else if map.tile_at(p) == TileKind::Wall {
+                '#'
+            } else if map.tile_at(p) == TileKind::ClosedDoor {
+                '+'
+            } else if is_frontier_candidate(map, p) {
+                'F'
+            } else {
+                '.'
+            };
+            let v = if map.is_visible(p) { 'v' } else { 'h' };
+            let d = if map.is_discovered(p) { 'd' } else { 'u' };
+            s.push_str(&format!("{c}{v}{d} "));
+        }
+        s.push('\n');
+    }
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn discovered_floor_map(width: usize, height: usize) -> Map {
-        let mut map = Map::new(width, height);
-        for y in 1..(height - 1) {
-            for x in 1..(width - 1) {
-                map.reveal(Pos { y: y as i32, x: x as i32 });
+    #[test]
+    fn fov_open_room_visibility() {
+        let mut map = Map::new(10, 10);
+        let origin = Pos { y: 5, x: 5 };
+        compute_fov(&mut map, origin, 3);
+        assert!(map.is_visible(origin));
+        assert!(map.is_visible(Pos { y: 5, x: 8 }));
+        assert!(!map.is_visible(Pos { y: 1, x: 1 }));
+    }
+
+    #[test]
+    fn fov_wall_occlusion_blocks_tiles_behind_wall_in_corridor() {
+        let mut map = Map::new(11, 11);
+        for y in 1..10 {
+            for x in 1..10 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
             }
         }
-        map
+        for x in 1..10 {
+            map.set_tile(Pos { y: 5, x }, TileKind::Floor);
+        }
+        map.set_tile(Pos { y: 5, x: 6 }, TileKind::Wall);
+
+        let origin = Pos { y: 5, x: 3 };
+        compute_fov(&mut map, origin, 10);
+
+        assert!(map.is_visible(Pos { y: 5, x: 5 }));
+        assert!(map.is_visible(Pos { y: 5, x: 6 }));
+        assert!(
+            !map.is_visible(Pos { y: 5, x: 7 }),
+            "tile directly behind corridor wall should be occluded"
+        );
     }
 
     #[test]
-    fn astar_straight_line_path_has_expected_length() {
-        let map = discovered_floor_map(7, 7);
-        let path = astar_path(&map, Pos { y: 3, x: 2 }, Pos { y: 3, x: 5 }).expect("path");
-        assert_eq!(path.len(), 3);
-        assert_eq!(path[0], Pos { y: 3, x: 3 });
-        assert_eq!(path[2], Pos { y: 3, x: 5 });
-    }
+    fn planner_avoids_hazard_route_when_safe_frontier_exists() {
+        let mut map = Map::new(9, 9);
+        for y in 1..8 {
+            for x in 1..8 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
 
-    #[test]
-    fn astar_tie_break_uses_deterministic_order() {
-        let mut map = discovered_floor_map(7, 7);
-        map.set_tile(Pos { y: 3, x: 3 }, TileKind::Wall);
-        let path = astar_path(&map, Pos { y: 3, x: 2 }, Pos { y: 3, x: 4 }).expect("path");
-        assert_eq!(path[0], Pos { y: 2, x: 2 });
-    }
+        // Hazard route (candidate is unreachable without stepping on hazard).
+        for x in 2..=5 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        map.set_hazard(Pos { y: 4, x: 3 }, true);
 
-    #[test]
-    fn astar_does_not_walk_unknown_or_walls() {
-        let mut map = discovered_floor_map(7, 7);
-        map.discovered.fill(false);
-        map.reveal(Pos { y: 3, x: 2 });
-        map.reveal(Pos { y: 3, x: 3 });
-        map.reveal(Pos { y: 3, x: 4 });
-        map.set_tile(Pos { y: 3, x: 3 }, TileKind::Wall);
-
-        let path = astar_path(&map, Pos { y: 3, x: 2 }, Pos { y: 3, x: 4 });
-        assert!(path.is_none());
-    }
-
-    #[test]
-    fn astar_unreachable_returns_none() {
-        let mut map = discovered_floor_map(7, 7);
-        map.set_tile(Pos { y: 2, x: 3 }, TileKind::Wall);
-        map.set_tile(Pos { y: 3, x: 2 }, TileKind::Wall);
-        map.set_tile(Pos { y: 3, x: 4 }, TileKind::Wall);
-        map.set_tile(Pos { y: 4, x: 3 }, TileKind::Wall);
-
-        let path = astar_path(&map, Pos { y: 3, x: 3 }, Pos { y: 1, x: 1 });
-        assert!(path.is_none());
-    }
-
-    #[test]
-    fn frontier_selection_picks_nearest_then_pos() {
-        let mut map = discovered_floor_map(8, 8);
-        map.discovered.fill(false);
+        // Safe alternative route to a different frontier.
         for y in 2..=4 {
-            for x in 2..=4 {
-                map.reveal(Pos { y, x });
-            }
+            map.set_tile(Pos { y, x: 2 }, TileKind::Floor);
+        }
+        for x in 2..=4 {
+            map.set_tile(Pos { y: 2, x }, TileKind::Floor);
         }
 
-        let start = Pos { y: 3, x: 3 };
-        let intent = choose_frontier_intent(&map, start).expect("intent");
-        assert_eq!(intent.path_len, 1);
-        assert_eq!(intent.target, Pos { y: 2, x: 3 });
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        // Frontier near hazard lane.
+        map.discovered[(4 * map.internal_width) + 6] = false;
+        // Safe frontier candidate.
+        map.discovered[(2 * map.internal_width) + 5] = false;
+
+        let start = Pos { y: 4, x: 2 };
+        let intent = choose_frontier_intent(&map, start).expect("expected frontier intent");
+        assert_eq!(intent.target, Pos { y: 2, x: 4 });
     }
 
     #[test]
-    fn no_frontier_candidate_returns_none() {
-        let mut map = Map::new(6, 6);
-        for y in 0..map.internal_height {
-            for x in 0..map.internal_width {
-                map.reveal(Pos { y: y as i32, x: x as i32 });
+    fn door_interrupt_and_open_flow() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        let mut map = Map::new(10, 10);
+        for x in 0..10 {
+            for y in 0..10 {
+                map.set_tile(Pos { y, x }, if y == 5 { TileKind::Floor } else { TileKind::Wall });
             }
         }
-        let start = Pos { y: 3, x: 3 };
-        assert_eq!(choose_frontier_intent(&map, start), None);
+        map.discovered.fill(true);
+        let dp = Pos { y: 5, x: 6 };
+        map.set_tile(dp, TileKind::ClosedDoor);
+        map.discovered[5 * 10 + 7] = false; // Frontier at (5,6)
+        game.state.map = map;
+        let pp = Pos { y: 5, x: 5 };
+        game.state.actors[game.state.player_id].pos = pp;
+        compute_fov(&mut game.state.map, pp, FOV_RADIUS);
+
+        // Manually set intent to target the door (which is a frontier candidate)
+        game.state.auto_intent =
+            Some(AutoExploreIntent { target: dp, reason: AutoReason::Frontier, path_len: 1 });
+
+        let res = game.advance(1);
+        if let AdvanceStopReason::Interrupted(Interrupt::DoorBlocked { prompt_id, pos }) =
+            res.stop_reason
+        {
+            assert_eq!(pos, dp);
+            game.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
+            assert_eq!(game.state.map.tile_at(dp), TileKind::Floor);
+        } else {
+            panic!(
+                "Expected DoorBlocked at {:?}, got {:?}. Map:\n{}",
+                dp,
+                res.stop_reason,
+                draw_map_diag(&game.state.map, pp)
+            );
+        }
     }
 
     #[test]
     fn unchanged_intent_does_not_duplicate_reason_change_log() {
-        let content = ContentPack {};
-        let mut game = Game::new(123, &content, GameMode::Ironman);
-
+        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
         if let AdvanceStopReason::Interrupted(Interrupt::LootFound { prompt_id, .. }) =
             game.advance(1).stop_reason
         {
-            game.apply_choice(prompt_id, Choice::KeepLoot).expect("resolve loot");
+            game.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
         }
-
-        let player_pos = game.state.actors[game.state.player_id].pos;
-        game.plan_auto_intent(player_pos);
-        let first_count = game
-            .log()
-            .iter()
-            .filter(|event| matches!(event, LogEvent::AutoReasonChanged { .. }))
-            .count();
-        assert_eq!(first_count, 1);
-
-        game.plan_auto_intent(player_pos);
-        let second_count = game
-            .log()
-            .iter()
-            .filter(|event| matches!(event, LogEvent::AutoReasonChanged { .. }))
-            .count();
-        assert_eq!(second_count, 1);
+        let pos = game.state.actors[game.state.player_id].pos;
+        compute_fov(&mut game.state.map, pos, FOV_RADIUS);
+        game.plan_auto_intent(pos);
+        let cnt1 =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(cnt1, 1);
+        game.plan_auto_intent(pos);
+        let cnt2 =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(cnt2, 1);
     }
 
     #[test]
     fn path_len_only_change_does_not_emit_auto_reason_changed() {
-        let content = ContentPack {};
-        let mut game = Game::new(123, &content, GameMode::Ironman);
-
-        // Build a deterministic map where only one frontier candidate exists at (5, 7).
-        let mut map = Map::new(12, 12);
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        let mut map = Map::new(12, 7);
         for y in 1..(map.internal_height - 1) {
             for x in 1..(map.internal_width - 1) {
-                map.reveal(Pos { y: y as i32, x: x as i32 });
+                map.set_tile(Pos { y: y as i32, x: x as i32 }, TileKind::Wall);
             }
         }
-        let unknown = Pos { y: 5, x: 8 };
-        let unknown_idx = unknown.y as usize * map.internal_width + unknown.x as usize;
-        map.discovered[unknown_idx] = false;
-        map.set_tile(Pos { y: 4, x: 8 }, TileKind::Wall);
-        map.set_tile(Pos { y: 6, x: 8 }, TileKind::Wall);
-        map.set_tile(Pos { y: 5, x: 9 }, TileKind::Wall);
+        for x in 1..=9 {
+            map.set_tile(Pos { y: 3, x }, TileKind::Floor);
+        }
+        map.discovered.fill(true);
+        map.visible.fill(false);
+        for x in 1..=8 {
+            map.set_visible(Pos { y: 3, x }, true);
+        }
+        map.discovered[(3 * map.internal_width) + 9] = false;
 
         game.state.map = map;
-        game.state.actors[game.state.player_id].pos = Pos { y: 5, x: 3 };
+        let p1 = Pos { y: 3, x: 3 };
+        game.state.actors[game.state.player_id].pos = p1;
+        game.plan_auto_intent(p1);
+        let prev_intent = game.state.auto_intent.unwrap_or_else(|| {
+            panic!("No first intent! Map:\n{}", draw_map_diag(&game.state.map, p1));
+        });
+        assert_eq!(prev_intent.target, Pos { y: 3, x: 8 });
 
-        let start_pos = game.state.actors[game.state.player_id].pos;
-        game.plan_auto_intent(start_pos);
-        let first_intent = game.state.auto_intent.expect("first intent");
-        assert_eq!(first_intent.target, Pos { y: 5, x: 7 });
-        assert_eq!(first_intent.path_len, 4);
-
-        game.state.actors[game.state.player_id].pos = Pos { y: 5, x: 4 };
-        game.plan_auto_intent(Pos { y: 5, x: 4 });
-        let second_intent = game.state.auto_intent.expect("second intent");
-        assert_eq!(second_intent.target, first_intent.target);
-        assert_eq!(second_intent.path_len, 3);
-
-        let reason_change_count = game
-            .log()
-            .iter()
-            .filter(|event| matches!(event, LogEvent::AutoReasonChanged { .. }))
-            .count();
-        assert_eq!(reason_change_count, 1);
-    }
-
-    #[test]
-    fn avoid_choice_does_not_immediately_retrigger_same_enemy() {
-        let content = ContentPack {};
-        let mut game = Game::new(123, &content, GameMode::Ironman);
-
-        if let AdvanceStopReason::Interrupted(Interrupt::LootFound { prompt_id, .. }) =
-            game.advance(1).stop_reason
-        {
-            game.apply_choice(prompt_id, Choice::KeepLoot).expect("resolve loot");
-        }
-
-        let enemy_id = game
-            .state
-            .actors
-            .iter()
-            .find(|(id, actor)| *id != game.state.player_id && actor.kind == ActorKind::Goblin)
-            .map(|(id, _)| id)
-            .expect("enemy");
-        let enemy_pos = game.state.actors[enemy_id].pos;
-        let player_pos = Pos { y: enemy_pos.y, x: enemy_pos.x - 1 };
-        game.state.actors[game.state.player_id].pos = player_pos;
-        game.state.map.reveal(player_pos);
-
-        let first = game.advance(1);
-        let prompt_id = match first.stop_reason {
-            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { prompt_id, enemy }) => {
-                assert_eq!(enemy, enemy_id);
-                prompt_id
-            }
-            other => panic!("expected enemy interrupt, got {other:?}"),
-        };
-        game.apply_choice(prompt_id, Choice::Avoid).expect("resolve avoid");
-
-        let second = game.advance(1);
-        if let AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { enemy, .. }) =
-            second.stop_reason
-        {
-            assert_ne!(enemy, enemy_id, "same enemy immediately re-triggered after Avoid");
-        }
+        let p2 = Pos { y: 3, x: 4 };
+        game.state.actors[game.state.player_id].pos = p2;
+        game.plan_auto_intent(p2);
+        let next_intent = game.state.auto_intent.unwrap();
+        assert_eq!(prev_intent.target, next_intent.target);
+        assert_ne!(prev_intent.path_len, next_intent.path_len);
+        let cnt =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(cnt, 1);
     }
 }

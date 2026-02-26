@@ -57,6 +57,7 @@ fn test_auto_explore_interrupt_choice_and_resume_loop() {
         let key = match interrupt {
             Interrupt::LootFound { .. } => KeyCode::L,
             Interrupt::EnemyEncounter { .. } => KeyCode::F,
+            Interrupt::DoorBlocked { .. } => KeyCode::O,
         };
         app.tick(&mut game, &[key]);
     }

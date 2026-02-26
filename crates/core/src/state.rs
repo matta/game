@@ -29,6 +29,8 @@ pub struct Map {
     pub internal_height: usize,
     pub tiles: Vec<TileKind>,
     pub discovered: Vec<bool>,
+    pub visible: Vec<bool>,
+    pub hazards: Vec<bool>,
 }
 
 impl Map {
@@ -47,6 +49,8 @@ impl Map {
             internal_height: height,
             tiles,
             discovered: vec![false; width * height],
+            visible: vec![false; width * height],
+            hazards: vec![false; width * height],
         }
     }
 
@@ -93,7 +97,49 @@ impl Map {
     }
 
     pub fn is_discovered_walkable(&self, pos: Pos) -> bool {
-        self.is_discovered(pos) && self.tile_at(pos) == TileKind::Floor
+        self.is_discovered(pos)
+            && (self.tile_at(pos) == TileKind::Floor || self.tile_at(pos) == TileKind::ClosedDoor)
+    }
+
+    pub fn clear_visible(&mut self) {
+        self.visible.fill(false);
+    }
+
+    pub fn set_visible(&mut self, pos: Pos, val: bool) {
+        if !self.in_bounds(pos) {
+            return;
+        }
+        let idx = self.index(pos);
+        self.visible[idx] = val;
+        if val {
+            self.discovered[idx] = true;
+        }
+    }
+
+    pub fn is_visible(&self, pos: Pos) -> bool {
+        if !self.in_bounds(pos) {
+            return false;
+        }
+        self.visible[self.index(pos)]
+    }
+
+    pub fn set_hazard(&mut self, pos: Pos, val: bool) {
+        if !self.in_bounds(pos) {
+            return;
+        }
+        let idx = self.index(pos);
+        self.hazards[idx] = val;
+    }
+
+    pub fn is_hazard(&self, pos: Pos) -> bool {
+        if !self.in_bounds(pos) {
+            return false;
+        }
+        self.hazards[self.index(pos)]
+    }
+
+    pub fn is_discovered_walkable_safe(&self, pos: Pos) -> bool {
+        self.is_discovered_walkable(pos) && !self.is_hazard(pos)
     }
 
     fn index(&self, pos: Pos) -> usize {

@@ -74,6 +74,13 @@ impl AppState {
                             self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
                         }
                     }
+                    Interrupt::DoorBlocked { .. } => {
+                        if keys_pressed.contains(&KeyCode::O) {
+                            game.apply_choice(id, core::Choice::OpenDoor)
+                                .expect("Failed to apply pending choice");
+                            self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                        }
+                    }
                 }
             }
             AppMode::Finished => {
@@ -95,6 +102,7 @@ impl AppState {
                     let prompt_id = match interrupt {
                         Interrupt::LootFound { prompt_id, .. } => prompt_id,
                         Interrupt::EnemyEncounter { prompt_id, .. } => prompt_id,
+                        Interrupt::DoorBlocked { prompt_id, .. } => prompt_id,
                     };
                     self.mode = AppMode::PendingPrompt {
                         interrupt,

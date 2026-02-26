@@ -18,7 +18,7 @@ async fn main() {
         if is_key_pressed(KeyCode::Right) {
             keys_pressed.push(KeyCode::Right);
         }
-        for key in [KeyCode::L, KeyCode::D, KeyCode::F, KeyCode::A] {
+        for key in [KeyCode::L, KeyCode::D, KeyCode::F, KeyCode::A, KeyCode::O] {
             if is_key_pressed(key) {
                 keys_pressed.push(key);
             }
@@ -60,37 +60,56 @@ fn draw_ascii_map(game: &Game, left: f32, top: f32, line_height: f32) {
     let state = game.state();
     let map = &state.map;
     for y in 0..map.internal_height {
-        let mut row = String::with_capacity(map.internal_width);
         for x in 0..map.internal_width {
             let pos = Pos { x: x as i32, y: y as i32 };
-            let mut ch = if !map.is_discovered(pos) {
-                ' '
-            } else {
-                match map.tile_at(pos) {
-                    TileKind::Wall => '#',
-                    TileKind::Floor => '.',
-                }
+            if !map.is_discovered(pos) {
+                draw_text(
+                    " ",
+                    left + x as f32 * 10.0,
+                    top + y as f32 * line_height,
+                    22.0,
+                    LIGHTGRAY,
+                );
+                continue;
+            }
+
+            let mut glyph = match map.tile_at(pos) {
+                TileKind::Wall => "#",
+                TileKind::Floor => ".",
+                TileKind::ClosedDoor => "+",
             };
 
+            let color = if map.is_visible(pos) { WHITE } else { GRAY };
+
+            let mut final_color = color;
+
             for (_, item) in &state.items {
-                if item.pos == pos {
-                    ch = '!';
+                if item.pos == pos && map.is_visible(pos) {
+                    glyph = "!";
+                    final_color = YELLOW;
                     break;
                 }
             }
 
             for (_, actor) in &state.actors {
-                if actor.pos == pos {
-                    ch = match actor.kind {
-                        core::ActorKind::Player => '@',
-                        core::ActorKind::Goblin => 'g',
+                if actor.pos == pos && map.is_visible(pos) {
+                    glyph = match actor.kind {
+                        core::ActorKind::Player => "@",
+                        core::ActorKind::Goblin => "g",
                     };
+                    final_color = if actor.kind == core::ActorKind::Player { GREEN } else { RED };
                     break;
                 }
             }
-            row.push(ch);
+
+            draw_text(
+                glyph,
+                left + x as f32 * 11.0,
+                top + y as f32 * line_height,
+                22.0,
+                final_color,
+            );
         }
-        draw_text(&row, left, top + y as f32 * line_height, 22.0, LIGHTGRAY);
     }
 }
 
@@ -118,5 +137,6 @@ fn prompt_text(interrupt: &Interrupt) -> &'static str {
     match interrupt {
         Interrupt::LootFound { .. } => "INTERRUPT: Loot found (L=keep, D=discard)",
         Interrupt::EnemyEncounter { .. } => "INTERRUPT: Enemy sighted (F=fight, A=avoid)",
+        Interrupt::DoorBlocked { .. } => "INTERRUPT: Door blocked (O=open)",
     }
 }
