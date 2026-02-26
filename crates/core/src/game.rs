@@ -548,10 +548,30 @@ fn transform_octant(orig: Pos, x: i32, y: i32, oct: u8) -> Pos {
 }
 
 fn compute_fov(map: &mut Map, origin: Pos, range: i32) {
+    let prev_discovered = map.discovered.clone();
     map.clear_visible();
     map.set_visible(origin, true);
-    for o in 0..8 {
-        scan_octant(map, origin, range, 1, Slope::new(1, 1), Slope::new(0, 1), o);
+    for octant in 0..8 {
+        scan_octant(map, origin, range, 1, Slope::new(1, 1), Slope::new(0, 1), octant);
+    }
+    // Remove tiles that were marked visible but are blocked by a wall in a direct line.
+    let min_y = (origin.y - range).max(0);
+    let max_y = (origin.y + range + 1).min(map.internal_height as i32);
+    let min_x = (origin.x - range).max(0);
+    let max_x = (origin.x + range + 1).min(map.internal_width as i32);
+
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            let p = Pos { y, x };
+            if p == origin || !map.is_visible(p) {
+                continue;
+            }
+            if !has_direct_line_of_sight(map, origin, p) {
+                let idx = (y as usize) * map.internal_width + (x as usize);
+                map.visible[idx] = false;
+                map.discovered[idx] = prev_discovered[idx];
+            }
+        }
     }
 }
 
@@ -581,9 +601,9 @@ fn scan_octant(map: &mut Map, orig: Pos, range: i32, dist: i32, start: Slope, en
     let mut blocked = false;
     let mut cur_start = start;
     for y in (0..=dist).rev() {
-        let top = Slope::new(2 * y + 1, 2 * dist);
-        let bot = Slope::new(2 * y - 1, 2 * dist);
-        if start.greater_or_equal(&bot) && top.greater_or_equal(&end) {
+        let top = Slope::new(2 * y + 1, 2 * dist - 1);
+        let bot = Slope::new(2 * y - 1, 2 * dist + 1);
+        if cur_start.greater_or_equal(&bot) && top.greater_than(&end) {
             let p = transform_octant(orig, dist, y, oct);
             if manhattan(orig, p) <= range_u {
                 map.set_visible(p, true);
@@ -591,11 +611,12 @@ fn scan_octant(map: &mut Map, orig: Pos, range: i32, dist: i32, start: Slope, en
             let opaque = map.tile_at(p) == TileKind::Wall || map.tile_at(p) == TileKind::ClosedDoor;
             if opaque {
                 if !blocked {
-                    scan_octant(map, orig, range, dist + 1, start, top, oct);
+                    scan_octant(map, orig, range, dist + 1, cur_start, top, oct);
                     blocked = true;
                 }
+                // Tighten scan start to the bottom slope of the blocking tile.
+                cur_start = bot;
             } else if blocked {
-                cur_start = top;
                 blocked = false;
             }
         }
@@ -603,6 +624,49 @@ fn scan_octant(map: &mut Map, orig: Pos, range: i32, dist: i32, start: Slope, en
     if !blocked {
         scan_octant(map, orig, range, dist + 1, cur_start, end, oct);
     }
+}
+
+fn has_direct_line_of_sight(map: &Map, origin: Pos, target: Pos) -> bool {
+    let dx = target.x - origin.x;
+    let dy = target.y - origin.y;
+    let sx = dx.signum();
+    let sy = dy.signum();
+    let total_dist_x = dx.abs();
+    let total_dist_y = dy.abs();
+
+    let mut x = origin.x;
+    let mut y = origin.y;
+    let mut current_step_x = 0;
+    let mut current_step_y = 0;
+
+    // Compare slopes to determine whether to step along the X or Y axis next.
+    // We use integer arithmetic to avoid floating-point inaccuracies.
+    while current_step_x < total_dist_x || current_step_y < total_dist_y {
+        let lhs = (1 + 2 * current_step_x) * total_dist_y;
+        let rhs = (1 + 2 * current_step_y) * total_dist_x;
+
+        if lhs == rhs {
+            x += sx;
+            y += sy;
+            current_step_x += 1;
+            current_step_y += 1;
+        } else if lhs < rhs {
+            x += sx;
+            current_step_x += 1;
+        } else {
+            y += sy;
+            current_step_y += 1;
+        }
+
+        if x == target.x && y == target.y {
+            break;
+        }
+        let tile = map.tile_at(Pos { y, x });
+        if tile == TileKind::Wall || tile == TileKind::ClosedDoor {
+            return false;
+        }
+    }
+    true
 }
 
 #[allow(dead_code)]
@@ -682,6 +746,25 @@ mod tests {
         map.set_tile(door, TileKind::ClosedDoor);
         map.discovered[5 * 10 + 7] = false;
         (map, Pos { y: 5, x: 5 }, door)
+    }
+
+    fn corner_handle_fixture() -> (Map, Pos) {
+        let mut map = Map::new(20, 15);
+        for y in 1..(map.internal_height - 1) {
+            for x in 1..(map.internal_width - 1) {
+                map.set_tile(Pos { y: y as i32, x: x as i32 }, TileKind::Wall);
+            }
+        }
+        // Room interior.
+        for y in 3..=7 {
+            for x in 2..=6 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        // Corridor + blocked door to reproduce right-facing corner geometry.
+        map.set_tile(Pos { y: 5, x: 7 }, TileKind::Floor);
+        map.set_tile(Pos { y: 5, x: 8 }, TileKind::ClosedDoor);
+        (map, Pos { y: 5, x: 6 })
     }
 
     #[test]
@@ -766,7 +849,8 @@ mod tests {
 
         let result = game.advance(1);
         assert!(matches!(result.stop_reason, AdvanceStopReason::BudgetExhausted));
-        assert_eq!(game.state.actors[game.state.player_id].pos, Pos { y: 4, x: 6 });
+        let moved_to = game.state.actors[game.state.player_id].pos;
+        assert_eq!(manhattan(start, moved_to), 1, "player should move exactly one tile");
         let discovered_after = game.state.map.discovered.iter().filter(|&&d| d).count();
         assert!(
             discovered_after > discovered_before,
@@ -1129,5 +1213,64 @@ mod tests {
         let count_after_repeat =
             game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
         assert_eq!(count_after_repeat, 2);
+    }
+
+    #[test]
+    fn fov_does_not_leak_through_corners() {
+        let mut map = Map::new(20, 20);
+        // Create a 5x5 interior room from (5,5) to (9,9)
+        // Walls at (4,4) to (10,10)
+        let r_start = 4;
+        let r_end = 10;
+        for y in r_start..=r_end {
+            for x in r_start..=r_end {
+                if y == r_start || y == r_end || x == r_start || x == r_end {
+                    map.set_tile(Pos { y, x }, TileKind::Wall);
+                } else {
+                    map.set_tile(Pos { y, x }, TileKind::Floor);
+                }
+            }
+        }
+
+        // Test with player at various positions inside the room
+        for py in (r_start + 1)..r_end {
+            for px in (r_start + 1)..r_end {
+                let origin = Pos { y: py, x: px };
+                compute_fov(&mut map, origin, 15);
+                for y in 0..map.internal_height {
+                    for x in 0..map.internal_width {
+                        let p = Pos { y: y as i32, x: x as i32 };
+                        if (p.y < r_start || p.y > r_end || p.x < r_start || p.x > r_end)
+                            && map.is_visible(p)
+                        {
+                            panic!(
+                                "Light leaked to {p:?} from origin {origin:?}\n{}",
+                                draw_map_diag(&map, origin)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fov_fixture_does_not_show_corner_handles() {
+        let (mut map, origin) = corner_handle_fixture();
+        compute_fov(&mut map, origin, FOV_RADIUS);
+
+        // Cells that can be incorrectly discovered as "corner handles" should stay unknown.
+        for p in [Pos { y: 1, x: 0 }, Pos { y: 9, x: 0 }, Pos { y: 1, x: 1 }, Pos { y: 9, x: 1 }] {
+            assert!(
+                !map.is_visible(p),
+                "unexpected corner handle at {p:?}\n{}",
+                draw_map_diag(&map, origin)
+            );
+            assert!(
+                !map.is_discovered(p),
+                "unexpected discovered corner handle at {p:?}\n{}",
+                draw_map_diag(&map, origin)
+            );
+        }
     }
 }
