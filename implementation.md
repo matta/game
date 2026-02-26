@@ -59,10 +59,22 @@ Requirements to guarantee identical runs across macOS and Linux:
 - Avoid floating-point nondeterminism (use integer math exclusively for logic/combat).
 - All randomness injected explicitly.
 - Deterministic containers/iteration: avoid `HashMap`/`HashSet` in simulation-critical paths unless keys are copied into a sorted buffer before iteration. Prefer `Vec` + explicit sort, or `BTreeMap`/`BTreeSet`.
+- `slotmap` iteration order is treated as non-contractual; deterministic systems/hashing must not depend on raw arena iteration order.
+- Actor and item records carry monotonic `spawn_seq` values assigned at creation; this is the primary stable ordering key.
+- For whole-world passes (turn queue rebuild, threat scans, hashing), iterate actors/items in `spawn_seq` ascending order.
 - Deterministic tie-breakers:
-  - Turn order: `(next_action_tick, speed_desc, spawn_seq, entity_id)`.
+  - Turn order: `(next_action_tick, speed_desc, spawn_seq)`; do not rely on generational key ordering for ties.
   - Path tie resolution: fixed neighbor expansion order `Up, Right, Down, Left`.
-- Stable snapshot hash: computed from canonical serialized state (`seed`, `tick`, `RunState`, last `prompt_id`) with a fixed hash function (`xxh3_64`).
+- Stable snapshot hash: `xxh3_64` over canonical binary encoding of minimal deterministic state only:
+  - `seed`, `tick`
+  - map tiles + deterministic tile metadata
+  - actor arena contents in `spawn_seq` ascending order
+  - item arena contents in `spawn_seq` ascending order
+  - RNG internal state
+  - `next_input_seq`
+  - policy state
+  - pending `prompt_id`/interrupt context (if any)
+- Explicitly excluded from snapshot hash: `log`, UI histories, replay trace buffers, and any presentation/transient app state.
 
 Game struct sketch:
 
@@ -91,7 +103,7 @@ pub struct TickFrame {
   pub tick: u64,
   pub player_pos: Pos,
   pub visible_actor_positions: Vec<(EntityId, Pos)>,
-  pub exploration_target: Option<Pos>,
+  pub auto_intent: Option<AutoExploreIntent>,
 }
 
 pub struct AdvanceResult {
@@ -170,6 +182,8 @@ pub enum CheckpointReason {
   LevelChanged,
   BranchCommitted,
   CampResolved,
+  PerkChosen,
+  BuildDefiningLootResolved,
 }
 ```
 
@@ -191,7 +205,7 @@ pub struct ObservationRef<'a> {
   pub visible_tiles: &'a [TileObservation],    // TileKind only; no glyph/color
   pub visible_actors: &'a [ActorObservation],  // logical entities in view
   pub player: PlayerObservation,               // logical stats and statuses
-  pub current_exploration_target: Option<Pos>, // why auto-explore is moving
+  pub current_auto_intent: Option<AutoExploreIntent>, // why auto-explore is moving
 }
 
 pub struct TileObservation {
@@ -212,11 +226,34 @@ pub struct PlayerObservation {
   pub status_bits: StatusBits,
 }
 
+pub struct AutoExploreIntent {
+  pub target: Pos,
+  pub reason: AutoReason,
+  pub path_len: u16,
+}
+
+pub enum AutoReason {
+  Frontier,
+  Loot,
+  BranchGoal,
+  ThreatAvoidance,
+  ReturnToSafe,
+}
+
 pub struct ObservationOwned {
   pub visible_tiles: Vec<TileObservation>,
   pub visible_actors: Vec<ActorObservation>,
   pub player: PlayerObservation,
-  pub current_exploration_target: Option<Pos>,
+  pub current_auto_intent: Option<AutoExploreIntent>,
+}
+
+pub enum LogEvent {
+  // ... other gameplay events
+  AutoReasonChanged {
+    reason: AutoReason,
+    target: Pos,
+    path_len: u16,
+  },
 }
 ```
 
@@ -224,6 +261,10 @@ Explicitly excluded from `ObservationRef`/`ObservationOwned`: glyphs, colors, fo
 Default render path should use `observation()` (`ObservationRef`) to avoid per-frame heap churn; `observation_owned()` is for tooling/debug paths where ownership is useful.
 
 `TickFrame` is also engine-agnostic (logical positions/targets only), and is used to pace presentation. Rendering style remains entirely in `app`.
+`AutoExploreIntent` is a required explainability artifact for pathing/frontier decisions.
+`core` emits `LogEvent::AutoReasonChanged` whenever the auto-explore target or reason changes.
+`path_len` is the planned shortest-path length from current player position to `target` at decision time.
+Emission rule: emit on `(target, reason)` transition; do not spam events for per-tick `path_len` shrink while following the same intent.
 
 Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
 
@@ -243,9 +284,11 @@ This contract enables a headless `tools/replay_runner` that exercises `core` wit
 ## 3.4 Easy Mode Checkpoint Model
 
 - Easy mode uses engine-authored checkpoint markers at deterministic boundaries (e.g., resolved god choice, level change, branch commitment, resolved camp).
+- Build-identity checkpoints are also supported (`PerkChosen`, `BuildDefiningLootResolved`).
 - On death, player may select any unlocked checkpoint.
 - Restore always replays from tick `0` to the checkpoint marker's `input_seq`; no state snapshot fast-path in MVP.
 - Checkpoint markers are persisted in the run save and must be consistent with deterministic replay.
+- To avoid checkpoint spam, build-defining loot checkpoints should be gated by explicit content flags/rarity tiers rather than firing for every pickup/equip.
 
 ---
 
@@ -255,14 +298,16 @@ This contract enables a headless `tools/replay_runner` that exercises `core` wit
 
 - `EntityId` (managed via `slotmap`)
 - `ItemId` (managed via `slotmap`; stable in interrupt/replay flows)
-- `Actor` (player or monster)
+- `Actor` (player or monster; includes monotonic `spawn_seq: u64`)
 - `Stats` (hp, atk, def, speed, limited resists)
 - `Status` (poison, bleed, slow — minimal set)
 - `Equipment` (small fixed slot set)
-- `ItemInstance`
+- `ItemInstance` (includes monotonic `spawn_seq: u64`)
 - `Perk`
 - `God` (passive modifiers only)
 - `Policy`
+- `ActiveActorIds` (`Vec<EntityId>`) for deterministic whole-world traversal
+- `ActiveItemIds` (`Vec<ItemId>`) for deterministic whole-world traversal
 
 ## 4.2 Policy Structure
 
@@ -283,8 +328,14 @@ pub struct Policy {
 ## 4.3 Spatial Systems
 All spatial algorithms live strictly within `core`, with no dependency on external rendering libraries.
 
-- **Pathing + minimal exploration intent (Milestone 2a):** A* pathing on discovered known-walkable tiles plus a simple frontier target selection (nearest unknown-adjacent discovered tile).
+- **Pathing + minimal exploration intent (Milestone 2a):** A* pathing on discovered known-walkable tiles plus a simple frontier target selection (nearest unknown-adjacent discovered tile), with `AutoExploreIntent { target, reason, path_len }` produced as a first-class output.
 - **FOV refinement (Milestone 2b):** Full Field of View + improved frontier selection and hazard-aware movement.
+
+## 4.4 Deterministic Traversal Rules
+
+- Never rely on raw `slotmap` iteration order for simulation decisions, logging semantics, or hashing.
+- Before deterministic global passes, obtain active IDs and evaluate records in `spawn_seq` ascending order.
+- If `spawn_seq` ever collides due to bug/corruption, fail fast in debug builds (do not silently fallback to generational key order).
 
 ---
 
@@ -457,16 +508,19 @@ async fn main() {
 ## Milestone 2a — Basic Pathing & Interrupt Loop (10–12 hrs)
 - Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
 - Implement minimal frontier selection (nearest unknown-adjacent discovered tile).
+- Implement `AutoExploreIntent { target, reason, path_len }` as required core output.
+- Emit `LogEvent::AutoReasonChanged { reason, target, path_len }` whenever target/reason changes.
 - Render ASCII map and display event log in `app`.
 - Implement trace-driven playback controls (visual ticks/sec) independent of simulation throughput.
 - Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
-*Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and movement rationale is understandable.*
+*Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and intent/reason changes are inspectable in the event log.*
 
 ## Milestone 2b — FOV & Exploration Intelligence (6–8 hrs)
 - Implement Field of View in `core`.
 - Improve frontier selection using visible frontier and danger scoring.
+- Expand `AutoReason` usage for FOV/hazard-driven decisions.
 - Handle edge cases: unknown tiles, doors, hazards, soft-danger avoidance.
-*Done when: explore feels intentional — the player understands why the character moved where it did.*
+*Done when: explore feels intentional and reason transitions remain coherent under FOV/hazard edge cases.*
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
 - Multi-enemy encounters.
@@ -500,7 +554,7 @@ async fn main() {
 ## Milestone 7 — Persistence, Replay, and Easy Mode Checkpoints (8–10 hrs)
 - Implement append-only `InputJournal` logging.
 - Load games by fast-forwarding journal events.
-- Add deterministic checkpoint marker generation at engine-authored boundaries.
+- Add deterministic checkpoint marker generation at engine-authored boundaries (including perk/build-defining loot events).
 - Implement death flow to select checkpoint and restore via replay from tick 0 to marker `input_seq`.
 - Use atomic writes + checksums for crash-safe persistence.
 *Done when: save/load, replay, and checkpoint time travel are reliable within the same build/content fingerprint.*
