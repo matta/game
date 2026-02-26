@@ -5,6 +5,7 @@ Stack: Rust + Macroquad
 Target: Desktop (macOS + Linux)  
 Run Length: 20–40 minutes  
 Time Budget: ~120 hours (10 hrs/week × 12 weeks)
+Determinism Budget: Capped at 25% of total hours (~30 hours)
 
 ---
 
@@ -278,6 +279,7 @@ pub struct Policy {
   pub stance: Stance,
   pub target_priority: Vec<TargetTag>,
   pub retreat_hp_threshold: u8,
+  pub auto_heal_if_below_threshold: Option<u8>,
   pub position_intent: PositionIntent, // MVP-restricted intent set
   pub resource_aggression: Aggro,
   pub exploration_mode: ExploreMode,
@@ -286,7 +288,7 @@ pub struct Policy {
 pub enum PositionIntent {
   HoldGround,
   AdvanceToMelee,
-  FleeToNearestExploredTile,
+  FleeToNearestExploredTile, // Utilizes "doorway bias" heuristic
 }
 ```
 
@@ -313,6 +315,8 @@ All spatial algorithms live strictly within `core`, with no dependency on extern
 
 - Multi-enemy encounter handling is intentionally spatially naive in MVP.
 - `PositionIntent` is restricted to `HoldGround`, `AdvanceToMelee`, and `FleeToNearestExploredTile`.
+- **"Doorway Bias" Heuristic:** Fleeing utilizes a single deterministic spatial heuristic: If ≥2 visible ranged enemies and current tile has ≥2 walkable neighbors, prefer stepping backward to a chokepoint.
+- **Sanctuary Zones:** Stair tiles (and the first tile of a new floor) are absolute safe zones (no enemy entry). Fleeing successfully to the stairs offers a genuine escape vector and resets an encounter.
 - No advanced tactical repositioning in MVP: no kiting logic, no deliberate LOS-break maneuvers, no corner-peeking planner.
 - Enemy selection and threat handling still use deterministic target-priority and retreat thresholds.
 
@@ -322,7 +326,7 @@ All spatial algorithms live strictly within `core`, with no dependency on extern
 
 Interrupt types (MVP subset):
 
-- LootFound
+- LootFound (Auto-discard trivial items. Only interrupt on "build-relevant" or rarity-gated loot. Reduce interrupt frequency to maintain flow.)
 - EnemyEncounter (first-sighting pre-commit stop)
 - HpThresholdReached (drops below `retreat_hp_threshold`, pausing for manual intervention)
 - BranchChoice
@@ -523,7 +527,8 @@ Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) d
 - [ ] Populate `core::content`: ~15 items, ~10 perks, 2 gods.
 - [ ] 6–8 enemy types, 1 boss.
 - [ ] 3–5 vault templates.
-*Done when: 3+ viable archetypes exist.*
+- [ ] **Weirdness Quota:** At least 5 items that modify rule systems (not just stat sticks). At least 3 perks that alter core mechanics (timing, targeting, economy).
+*Done when: 3+ viable archetypes exist meeting the Weirdness Quota.*
 
 ## Milestone 6 — Fairness Tooling (8–10 hrs)
 - [ ] Refine threat tags and static encounter facts.
@@ -573,6 +578,8 @@ Windows support: optional later.
 ---
 
 # 11. Test Strategy and Complexity Analysis (MVP)
+
+**Hard Cap on Determinism Engineering:** Determinism engineering budget is strictly capped at 25% of total hours (~30 hours). Once replay works, snapshot hashing is stable, and there is one determinism smoke test — stop. No more determinism work until content is complete.
 
 Goal: maximize bug-catching per engineering hour, given a ~120 hour budget.
 
@@ -657,7 +664,7 @@ pub fn sword_of_healing() -> ItemDef {
 ```
 This is a calculated risk. It borders on "OOP morass" where entities own their own logic, breaking strict data/logic separation. However, given the tiny MVP scope (~15 items, ~10 perks), the velocity gained by avoiding a complex data schema engine far outweighs the structural impurity. If the game succeeds and scaling to 200+ items is required, this debt must be paid down by extracting a pure data schema.
 
-## DR-009: No Auto-Consumption of Inventory or Loadout Rules
+## DR-009: Constrained Auto-Consumption over Full AI Evaluation
 **Context:** The `Policy` struct initially included `loadout_rule` (when to swap weapons) and `consume_hp_threshold` (when to automatically drink a potion).
-**Decision:** Cut both features. Auto-explore will automate movement and attacking, but will never automatically spend turn economy to use inventory items or swap equipment.
-**Rationale:** Building an AI logic block to safely evaluate when it is "worth" spending a turn to swap a weapon or drink a limited consumable is complex. A misjudgment by the AI (e.g., spending 2 turns to swap to a bow while flanked by a goblin, leading to death) feels inherently "unfair" to the player. By forcing the player to handle inventory usage manually during the guaranteed `EnemyEncounter` or `Retreat` pause interrupts, we avoid writing brittle evaluator AI and preserve the player's agency over their most limited resources.
+**Decision:** Cut full evaluator AI and loadout swapping, but retain soft, rigid auto-consumption (`auto_heal_if_below_threshold: Option<u8>`). Auto-consumption is highly constrained: it triggers only once per encounter, requires a matching potion type, and never triggers during multi-enemy combats unless retreating.
+**Rationale:** Building an AI logic block to safely evaluate when it is "worth" spending a turn to swap a weapon or drink a limited consumable is complex and brittle. However, completely removing auto-consumption reintroduces tactical micromanagement, violating the core "policy over micromanagement" vision. By allowing a single, deterministic heuristic for emergency potion usage, we preserve the policy fantasy, maintain low implementation complexity, and avoid forcing the player to manually drink potions every fight.
