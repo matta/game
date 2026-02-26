@@ -206,7 +206,7 @@ pub enum LogEvent {
 Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
 Action-cost requirement: loadout swaps are manual in-world actions that consume ticks; no free pre-combat equipment changes.
 MVP policy timing split:
-- Loadout-affecting updates (equip/swap) are issued manually during an interrupt pause and consume time via `SwapLoadout` action(s).
+- Loadout-affecting updates (equip/swap) are issued manually during an interrupt pause and consume time via `SwapActiveWeapon` action(s).
 - Policy knob edits (priority/stance/thresholds) are applied at pause boundaries without direct tick cost.
 
 This contract enables a headless `tools/replay_runner` that exercises `core` without any rendering dependency.
@@ -306,8 +306,8 @@ All spatial algorithms live strictly within `core`, with no dependency on extern
 
 ## 4.5 Loadout Action Semantics (MVP)
 
-- `SwapLoadout` is a first-class simulation action with tick cost (same timing model as other actor actions).
-- `SwapLoadout` is strictly a manual command issued by the player upon an interrupt pause; auto behavior never bypasses turn economy to swap gear.
+- `SwapActiveWeapon` is a first-class simulation action with tick cost (same timing model as other actor actions).
+- `SwapActiveWeapon` is strictly a manual command issued by the player upon an interrupt pause; auto behavior never bypasses turn economy to swap gear.
 - Enemy reactions occur according to normal turn ordering; swapping can expose player to incoming actions.
 - Emit deterministic log events for executed swaps so replay/debug can explain pre-combat openings.
 
@@ -355,7 +355,7 @@ pub struct OpeningActionPreview {
 }
 
 pub enum OpeningAction {
-  SwapLoadout { to: LoadoutId },
+  SwapActiveWeapon { to: LoadoutId },
   HoldCurrentLoadout,
 }
 ```
@@ -561,23 +561,99 @@ Post-2a review carry-over:
 - [ ] Post-MVP door-state semantics: preserve door identity when opened (e.g., `ClosedDoor -> OpenDoor`) instead of collapsing to `Floor`.
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
-- [ ] Multi-enemy encounters.
-- [ ] Replace the current single-room default dungeon with a deterministic multi-room starter layout (at least 3 rooms + connecting corridors).
-- [ ] Ensure the default starter layout includes at least one closed-door choke and at least one hazard lane so existing 2b systems are exercised in normal play.
-- [ ] Add an integration smoke test for the default starter layout that confirms a run can encounter both a door interrupt and hazard-influenced auto-explore intent.
-- [ ] Implement MVP `Policy` controls (Target priority, Stance modifiers, Retreat logic, restricted `PositionIntent`).
-- [ ] Restrict policy updates to paused tick boundaries and journal every accepted update with boundary tick.
-- [ ] Implement `SwapLoadout` as a time-costing simulation action.
-- [ ] Ensure first-sighting `EnemyEncounter` interrupts occur before opening combat actions.
-- [ ] Implement a micro-set of test content (2 weapons, 1 consumable, 2 perks) to validate policy behaviors.
-- [ ] Wire UI to update policy knobs.
-- [ ] Add baseline fairness instrumentation: death-cause reason codes, enemy-encounter `ThreatSummary`, and a compact per-turn threat trace.
-**Exit Criteria:**
-- **a) User Experience:** The player uses UI to tweak loadouts, priorities, and retreat conditions on pause. Threat summaries present transparent "fair" tactical information pre-combat. Death screens definitively explain why the player died.
-- **b) Progress toward vision:** Combat policy controls (Vision 3.2) implemented. Validates "Policy over micromovement" principle (Vision 1.2, 8.1).
-- **c) Architecture & Maintainability:** Action time-costing proven deterministic. The system handles out-of-band state changes (policy tweaks mid-interrupt) without corrupting the append-only `InputJournal`. Death-trace logs become a first-class debugging output.
 
-Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) defers to post-MVP.
+Execution guardrails for all Milestone 3 passes:
+- [ ] Execute passes strictly in order: `3a -> 3b -> 3c -> 3d -> 3e`.
+- [ ] Use TDD in every pass: add failing test(s) first, then implement the minimum code to pass.
+- [ ] After each pass, run all required checks with no warnings/errors: `cargo fmt -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`.
+- [ ] Do not redesign policy architecture during implementation; use the contracts already defined in sections **4.2**, **4.5**, **4.6**, and **5**.
+
+### Milestone 3a — Starter Dungeon Coverage Baseline (3–4 hrs)
+- [ ] Replace the current single-room default map in `Game::new` with a deterministic starter layout on a `20x15` map using exact coordinates:
+- [ ] Room A floor rectangle: `x=2..6`, `y=3..7` (player start room; player starts at `(x=4, y=5)`).
+- [ ] Room B floor rectangle: `x=9..13`, `y=3..7`.
+- [ ] Room C floor rectangle: `x=9..13`, `y=9..13`.
+- [ ] Corridor A<->B floor tiles: `(x=7, y=5)` and `(x=8, y=5)` with `ClosedDoor` at `(x=8, y=5)`.
+- [ ] Corridor B<->C floor tiles: `(x=11, y=8)` and `(x=11, y=9)`.
+- [ ] Hazard lane tiles (all hazardous): `(x=11, y=8)`, `(x=11, y=9)`, `(x=11, y=10)`.
+- [ ] Spawn at least two goblins for deterministic multi-enemy setup at fixed positions `(x=11, y=5)` and `(x=11, y=11)`.
+- [ ] Add a starter-layout unit test that asserts door placement, hazard placement, and actor spawn coordinates exactly.
+- [ ] Add an integration smoke test on fixed seed that confirms normal auto-run can hit both `DoorBlocked` interrupt and `AutoReason::ThreatAvoidance` within `<= 250` ticks.
+**Pass 3a Exit Criteria:**
+- **a) User Experience:** A fresh run no longer feels like a single test chamber; the player traverses multiple connected rooms and can naturally encounter a door stop and hazard-influenced exploration.
+- **b) Progress toward vision:** Promotes exploration from a synthetic demo to a representative dungeon slice and verifies Milestone 2b systems (door/hazard/FOV intenting) in normal play flow.
+- **c) Architecture & Maintainability:** Starter layout is fully deterministic and locked by coordinate-based tests, so future combat/policy work can rely on a stable integration map.
+
+### Milestone 3b — Multi-Enemy Encounter Interrupt Semantics (3–4 hrs)
+- [ ] Expand enemy encounter collection to support multiple hostiles in a single interrupt event.
+- [ ] Deterministic enemy ordering rule for encounter lists: sort by `(distance_to_player, pos.y, pos.x, actor_kind)`.
+- [ ] Define `primary_enemy` as index `0` from the sorted encounter list; `Fight`/`Avoid` applies to that enemy only.
+- [ ] Ensure first-sighting `EnemyEncounter` interrupt is emitted before opening combat actions or auto movement for that tick.
+- [ ] Keep `Avoid` suppression scoped to one enemy (`primary_enemy`) and clear suppression when that enemy is no longer adjacent or no longer exists.
+- [ ] Add unit test: two adjacent enemies produce a stable sorted encounter list and stable `primary_enemy`.
+- [ ] Add unit test: `Avoid` suppresses only the selected enemy and still allows interrupts from another adjacent enemy.
+- [ ] Add integration test: resolving one enemy in a multi-enemy encounter leaves remaining enemies active and interrupt-capable.
+**Pass 3b Exit Criteria:**
+- **a) User Experience:** Multi-enemy contact is understandable and consistent: the player gets a clear encounter pause with deterministic enemy ordering and predictable follow-up behavior after `Fight` or `Avoid`.
+- **b) Progress toward vision:** Removes the hidden single-enemy assumption and establishes the minimum viable multi-hostile combat entry point needed for policy-driven encounters.
+- **c) Architecture & Maintainability:** Encounter selection/suppression semantics are explicit and test-locked, preventing nondeterministic target flipping or regressions in interrupt priority.
+
+### Milestone 3c — Policy Model + Boundary-Safe Update Pipeline (3–4 hrs)
+- [ ] Implement `Policy` state in `GameState` using the schema from section **4.2** (no extra fields).
+- [ ] Add concrete default policy values:
+- [ ] `fight_or_avoid = Fight`.
+- [ ] `stance = Balanced`.
+- [ ] `target_priority = [Nearest, LowestHp]`.
+- [ ] `retreat_hp_threshold = 35`.
+- [ ] `auto_heal_if_below_threshold = None`.
+- [ ] `position_intent = HoldGround`.
+- [ ] `resource_aggression = Conserve`.
+- [ ] `exploration_mode = Thorough`.
+- [ ] Add `PolicyUpdate` payload variants to mutate each policy field independently.
+- [ ] Add `Game::apply_policy_update` and enforce timing rule: updates are accepted only while paused at a tick boundary (`Interrupted` or `PausedAtBoundary` state), otherwise rejected.
+- [ ] Extend journal input payloads with `PolicyUpdate { tick_boundary, update }` and append every accepted update with current boundary tick.
+- [ ] Extend replay to apply journaled policy updates at the recorded boundary before the next simulation tick.
+- [ ] Add tests for accepted/rejected timing and replay equivalence (`same seed + same journal => same final hash`).
+**Pass 3c Exit Criteria:**
+- **a) User Experience:** While paused, the player can change policy knobs and trust that updates apply exactly when intended (not mid-tick), with invalid timing rejected cleanly.
+- **b) Progress toward vision:** Policy control becomes a concrete game mechanism rather than a design placeholder, and replay/save flows now include policy decisions as first-class inputs.
+- **c) Architecture & Maintainability:** Boundary-gated policy updates plus journal/replay coverage preserve determinism and prevent state corruption from out-of-band policy edits.
+
+### Milestone 3d — Policy Effects + SwapActiveWeapon + Micro Content (3–4 hrs)
+- [ ] Implement policy-driven target selection using `target_priority` when multiple enemies are in range; fallback tie-breaker remains `(distance, y, x, kind)`.
+- [ ] Implement stance modifiers with fixed deterministic combat deltas:
+- [ ] `Aggressive`: `+2 atk`, `-1 def`.
+- [ ] `Balanced`: `+0 atk`, `+0 def`.
+- [ ] `Defensive`: `-1 atk`, `+2 def`.
+- [ ] Implement retreat trigger check at encounter start: if `hp_percent <= retreat_hp_threshold`, mark encounter as retreat-eligible for policy/UI.
+- [ ] Implement `SwapActiveWeapon` as a simulation action with fixed tick cost `10`. Since there is no inventory grid, this toggles between a primary and reserve weapon. Available anytime the game is paused, but typically used during an enemy encounter.
+- [ ] Ensure `SwapActiveWeapon` execution is journaled and replayed deterministically like other player inputs.
+- [ ] Add micro validation content in `core::content`: exactly `2` weapons, `1` consumable, `2` perks with deterministic numeric effects (no proc chance).
+- [ ] Add tests verifying swap tick cost is applied and affects turn order deterministically.
+- [ ] Add tests verifying stance and target priority change deterministic combat outcomes in fixture encounters.
+**Pass 3d Exit Criteria:**
+- **a) User Experience:** Policy choices have immediate, visible combat impact (targeting, stance behavior, retreat eligibility), and pre-combat loadout swaps feel fair because they consume deterministic time.
+- **b) Progress toward vision:** Delivers the first end-to-end “policy over micromovement” combat loop, backed by minimal content that proves knob effects are meaningful in actual encounters.
+- **c) Architecture & Maintainability:** Combat deltas and swap timing are explicit numeric rules with deterministic tests, reducing ambiguity and making future balancing/refactors safer.
+
+### Milestone 3e — UI Wiring + Fairness Instrumentation (2–3 hrs)
+- [ ] Add app controls to edit all MVP policy knobs while paused; disallow edits while running.
+- [ ] Add encounter panel rendering for deterministic `ThreatSummary` with sorted danger tags.
+- [ ] Add baseline death-cause reason codes and surface the reason code in defeat UI/log output.
+- [ ] Add compact per-turn threat trace ring buffer (latest `32` entries) with deterministic fields: `tick`, `visible_enemy_count`, `min_enemy_distance`, `retreat_triggered`.
+- [ ] Add tests ensuring `ThreatSummary` tag ordering is deterministic and stable across repeated runs with identical inputs.
+- [ ] Add integration test validating policy edit -> resume -> resulting behavior and logs are replay-stable.
+**Pass 3e Exit Criteria:**
+- **a) User Experience:** The player can fully configure policy from pause UI, inspect threat context before committing, and receive actionable defeat explanations instead of opaque losses.
+- **b) Progress toward vision:** Completes the milestone’s fairness and transparency layer so policy decisions are explainable, debuggable, and consistent with the intended combat control surface.
+- **c) Architecture & Maintainability:** Threat/death instrumentation uses deterministic ordering and bounded trace storage, enabling stable replay comparisons and low-noise debugging workflows.
+
+**Exit Criteria:**
+- **a) User Experience:** The player explores a richer starter dungeon, meets multi-enemy encounters, can tune policy/loadout while paused, and receives readable threat/death explanations.
+- **b) Progress toward vision:** Combat policy controls (Vision 3.2) are concretely implemented and no longer abstract placeholders.
+- **c) Architecture & Maintainability:** Each pass lands with deterministic tests, boundary-safe policy journaling, and replay-consistent outcomes.
+
+Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) and predictive combat forecasting defer to post-MVP.
 
 ## Milestone 4 — Floors + Branching (12–15 hrs)
 - [ ] Multiple floors (strict one-way descent).
