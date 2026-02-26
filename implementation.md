@@ -466,84 +466,84 @@ async fn main() {
 # 8. Milestone Roadmap
 
 ## Milestone 0 — Workspace Setup (3–5 hrs)
-- Create 3-crate workspace (`core`, `app`, `tools`).
-- Add rustfmt + clippy.
-- Basic CI (test + lint).
-- README.
+- [x] Create 3-crate workspace (`core`, `app`, `tools`).
+- [x] Add rustfmt + clippy.
+- [x] Basic CI (test + lint).
+- [x] README.
 *Done when: `cargo test` passes cleanly.*
 
 ## Milestone 1 — CoreSim Skeleton & Initial UI (10–12 hrs)
-- Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
-- Implement `RunState` and basic map structure (dense tile arrays).
-- Implement `advance(...)` API (`AdvanceResult`, stop reasons) and prompt-bound `apply_choice`.
-- Implement headless replay API in `core` (`replay_to_end(content, journal) -> ReplayResult`).
-- Add thin `tools/replay_runner` CLI wrapper that prints final `snapshot_hash`/outcome from a journal file.
-- Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
-- Implement single-clock auto loop (synchronous batch stepping) with pause-at-next-tick-boundary behavior.
-- Implement Player + 1 enemy, turn engine, and fake loot interrupt.
+- [x] Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
+- [x] Implement `RunState` and basic map structure (dense tile arrays).
+- [x] Implement `advance(...)` API (`AdvanceResult`, stop reasons) and prompt-bound `apply_choice`.
+- [x] Implement headless replay API in `core` (`replay_to_end(content, journal) -> ReplayResult`).
+- [ ] Add thin `tools/replay_runner` CLI wrapper that prints final `snapshot_hash`/outcome from a journal file.
+- [ ] Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
+- [ ] Implement single-clock auto loop (synchronous batch stepping) with pause-at-next-tick-boundary behavior.
+- [x] Implement Player + 1 enemy, turn engine, and fake loot interrupt.
 *Done when: repeated runs with the same seed/journal produce identical final snapshot hash via headless replay API.*
 
 ## Milestone 2a — Basic Pathing & Interrupt Loop (10–12 hrs)
-- Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
-- Implement minimal frontier selection (nearest unknown-adjacent discovered tile).
-- Implement `AutoExploreIntent { target, reason, path_len }` as required core output.
-- Emit `LogEvent::AutoReasonChanged { reason, target, path_len }` whenever target/reason changes.
-- Render ASCII map and display event log in `app`.
-- Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
+- [ ] Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
+- [ ] Implement minimal frontier selection (nearest unknown-adjacent discovered tile).
+- [ ] Implement `AutoExploreIntent { target, reason, path_len }` as required core output.
+- [ ] Emit `LogEvent::AutoReasonChanged { reason, target, path_len }` whenever target/reason changes.
+- [ ] Render ASCII map and display event log in `app`.
+- [ ] Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
 *Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and intent/reason changes are inspectable in the event log.*
 
 ## Milestone 2b — FOV & Exploration Intelligence (6–8 hrs)
-- Implement minimum viable deterministic FOV in `core` (simple shadowcasting or equivalent simple method).
-- Improve frontier selection using visible frontier only.
-- Implement danger scoring v0: avoid known hazard tiles only.
-- Treat closed doors as walls until explicitly opened through an interrupt (no full door simulation in 2b).
-- Expand `AutoReason` usage for FOV/hazard-driven decisions.
+- [ ] Implement minimum viable deterministic FOV in `core` (simple shadowcasting or equivalent simple method).
+- [ ] Improve frontier selection using visible frontier only.
+- [ ] Implement danger scoring v0: avoid known hazard tiles only.
+- [ ] Treat closed doors as walls until explicitly opened through an interrupt (no full door simulation in 2b).
+- [ ] Expand `AutoReason` usage for FOV/hazard-driven decisions.
 *Done when: explore remains coherent under FOV constraints and hazard avoidance v0, without complex door/hazard simulation.*
 Scope guard: advanced door/hazard simulation and richer danger scoring defer to Milestone 6 or post-MVP.
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
-- Multi-enemy encounters.
-- Implement MVP `Policy` controls (Target priority, Stance modifiers, Retreat logic, restricted `PositionIntent`).
-- Restrict policy updates to paused tick boundaries and journal every accepted update with boundary tick.
-- Implement `SwapLoadout` as a time-costing simulation action.
-- Ensure first-sighting `EnemyEncounter` interrupts occur before opening combat actions.
-- Implement a micro-set of test content (2 weapons, 1 consumable, 2 perks) to validate policy behaviors.
-- Wire UI to update policy knobs.
-- Add baseline fairness instrumentation: death-cause reason codes, enemy-encounter `ThreatSummary`, and a compact per-turn threat trace.
+- [ ] Multi-enemy encounters.
+- [ ] Implement MVP `Policy` controls (Target priority, Stance modifiers, Retreat logic, restricted `PositionIntent`).
+- [ ] Restrict policy updates to paused tick boundaries and journal every accepted update with boundary tick.
+- [ ] Implement `SwapLoadout` as a time-costing simulation action.
+- [ ] Ensure first-sighting `EnemyEncounter` interrupts occur before opening combat actions.
+- [ ] Implement a micro-set of test content (2 weapons, 1 consumable, 2 perks) to validate policy behaviors.
+- [ ] Wire UI to update policy knobs.
+- [ ] Add baseline fairness instrumentation: death-cause reason codes, enemy-encounter `ThreatSummary`, and a compact per-turn threat trace.
 *Done when: automated combat resolves from policy/build choices, opening swap costs are explicit/time-costed, encounter threat summaries are visible pre-commit, and death traces explain what happened with spatially naive positioning.*
 Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) defers to post-MVP.
 
 ## Milestone 4 — Floors + Branching (12–15 hrs)
-- Multiple floors (strict one-way descent).
-- Branching paths (modifies spawn tables/environment).
-- No overworld selector or ascending mechanics.
+- [ ] Multiple floors (strict one-way descent).
+- [ ] Branching paths (modifies spawn tables/environment).
+- [ ] No overworld selector or ascending mechanics.
 *Done when: route choice matters.*
 
 ## Milestone 5 — Content Pass (15–18 hrs)
-- Populate `core::content`: ~15 items, ~10 perks, 2 gods.
-- 6–8 enemy types, 1 boss.
-- 3–5 vault templates.
+- [ ] Populate `core::content`: ~15 items, ~10 perks, 2 gods.
+- [ ] 6–8 enemy types, 1 boss.
+- [ ] 3–5 vault templates.
 *Done when: 3+ viable archetypes exist.*
 
 ## Milestone 6 — Fairness Tooling (8–10 hrs)
-- Refine threat tags and static encounter facts.
-- Seed display + copy.
-- Determinism hash.
-- Death-recap UI using reason codes from Milestone 3.
+- [ ] Refine threat tags and static encounter facts.
+- [ ] Seed display + copy.
+- [ ] Determinism hash.
+- [ ] Death-recap UI using reason codes from Milestone 3.
 *Done when: deaths are reproducible and explainable to the player.*
 
 ## Milestone 7 — Persistence, Replay, and Easy Mode Checkpoints (8–10 hrs)
-- Implement append-only `InputJournal` logging in memory, writing atomically on new inputs.
-- Load games by replaying journal events from tick 0.
-- Add deterministic checkpoint marker generation at engine-authored boundaries.
-- Implement death flow to select checkpoint and restore via truncating journal and replaying from tick 0.
+- [ ] Implement append-only `InputJournal` logging in memory, writing atomically on new inputs.
+- [ ] Load games by replaying journal events from tick 0.
+- [ ] Add deterministic checkpoint marker generation at engine-authored boundaries.
+- [ ] Implement death flow to select checkpoint and restore via truncating journal and replaying from tick 0.
 *Done when: save/load, replay, and checkpoint time travel use the exact same code path and are reliable.*
 
 ## Milestone 8 — Release Packaging (8–10 hrs)
-- Versioning and final balance pass.
-- macOS + Linux builds.
-- Run summary screen.
-- GitHub release or Itch upload.
+- [ ] Versioning and final balance pass.
+- [ ] macOS + Linux builds.
+- [ ] Run summary screen.
+- [ ] GitHub release or Itch upload.
 *Done when: a friend can download and play.*
 
 ---
