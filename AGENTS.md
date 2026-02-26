@@ -4,3 +4,5 @@
     - cargo clippy
     - cargo test
     - cargo fmt -- --check
+- Prefer "Plain English" and jargon-free explanations in documentation, comments, names in code, and commit messages. Exception: technical terms High School students would understand are fine, as are Computer Science terms a university student would understand.
+- Avoid cryptic variable names; prefer words.

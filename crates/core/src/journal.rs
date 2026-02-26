@@ -1,4 +1,4 @@
-use crate::types::{Choice, ChoicePromptId};
+use crate::types::{Choice, ChoicePromptId, PolicyUpdate};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,7 @@ pub struct InputRecord {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum InputPayload {
     Choice { prompt_id: ChoicePromptId, choice: Choice },
-    // PolicyUpdate(...) would go here
+    PolicyUpdate { tick_boundary: u64, update: PolicyUpdate },
 }
 
 impl InputJournal {
@@ -36,5 +36,12 @@ impl InputJournal {
 
     pub fn append_choice(&mut self, prompt_id: ChoicePromptId, choice: Choice, seq: u64) {
         self.inputs.push(InputRecord { seq, payload: InputPayload::Choice { prompt_id, choice } });
+    }
+
+    pub fn append_policy_update(&mut self, tick_boundary: u64, update: PolicyUpdate, seq: u64) {
+        self.inputs.push(InputRecord {
+            seq,
+            payload: InputPayload::PolicyUpdate { tick_boundary, update },
+        });
     }
 }

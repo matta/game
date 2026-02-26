@@ -40,6 +40,7 @@ pub struct Game {
     pending_prompt: Option<PendingPrompt>,
     suppressed_enemy: Option<EntityId>,
     pause_requested: bool,
+    at_pause_boundary: bool,
 }
 
 impl Game {
@@ -157,16 +158,25 @@ impl Game {
             seed,
             tick: 0,
             rng,
-            state: GameState { map, actors, items, player_id, auto_intent: None },
+            state: GameState {
+                map,
+                actors,
+                items,
+                player_id,
+                auto_intent: None,
+                policy: Policy::default(),
+            },
             log: Vec::new(),
             next_input_seq: 0,
             pending_prompt: None,
             suppressed_enemy: None,
             pause_requested: false,
+            at_pause_boundary: true,
         }
     }
 
     pub fn advance(&mut self, max_steps: u32) -> AdvanceResult {
+        self.at_pause_boundary = false;
         let mut steps = 0;
         if let Some(prompt) = self.pending_prompt.clone() {
             return AdvanceResult {
@@ -178,6 +188,7 @@ impl Game {
         while steps < max_steps {
             if self.pause_requested {
                 self.pause_requested = false;
+                self.at_pause_boundary = true;
                 return AdvanceResult {
                     simulated_ticks: steps,
                     stop_reason: AdvanceStopReason::PausedAtBoundary { tick: self.tick },
@@ -295,6 +306,25 @@ impl Game {
         }
         self.pending_prompt = None;
         self.next_input_seq += 1;
+        Ok(())
+    }
+
+    pub fn apply_policy_update(&mut self, update: PolicyUpdate) -> Result<(), GameError> {
+        if !self.at_pause_boundary && self.pending_prompt.is_none() {
+            return Err(GameError::NotAtPauseBoundary);
+        }
+        match update {
+            PolicyUpdate::FightMode(m) => self.state.policy.fight_or_avoid = m,
+            PolicyUpdate::Stance(s) => self.state.policy.stance = s,
+            PolicyUpdate::TargetPriority(t) => self.state.policy.target_priority = t,
+            PolicyUpdate::RetreatHpThreshold(h) => self.state.policy.retreat_hp_threshold = h,
+            PolicyUpdate::AutoHealIfBelowThreshold(h) => {
+                self.state.policy.auto_heal_if_below_threshold = h
+            }
+            PolicyUpdate::PositionIntent(i) => self.state.policy.position_intent = i,
+            PolicyUpdate::ResourceAggression(a) => self.state.policy.resource_aggression = a,
+            PolicyUpdate::ExplorationMode(e) => self.state.policy.exploration_mode = e,
+        }
         Ok(())
     }
 

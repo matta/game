@@ -18,7 +18,9 @@ async fn main() {
         if is_key_pressed(KeyCode::Right) {
             keys_pressed.push(KeyCode::Right);
         }
-        for key in [KeyCode::L, KeyCode::D, KeyCode::F, KeyCode::A, KeyCode::O] {
+        for key in
+            [KeyCode::L, KeyCode::D, KeyCode::F, KeyCode::A, KeyCode::O, KeyCode::M, KeyCode::T]
+        {
             if is_key_pressed(key) {
                 keys_pressed.push(key);
             }
@@ -51,6 +53,11 @@ async fn main() {
             "Intent: none".to_string()
         };
         draw_text(&intent_text, 20.0, 380.0, 20.0, WHITE);
+
+        let policy = &game.state().policy;
+        draw_text("Policy: ", 20.0, 420.0, 20.0, YELLOW);
+        draw_text(&format!("[M]ode: {:?}", policy.fight_or_avoid), 20.0, 440.0, 18.0, LIGHTGRAY);
+        draw_text(&format!("s[T]ance: {:?}", policy.stance), 20.0, 460.0, 18.0, LIGHTGRAY);
 
         next_frame().await
     }

@@ -600,21 +600,21 @@ Execution guardrails for all Milestone 3 passes:
 - **c) Architecture & Maintainability:** Encounter selection/suppression semantics are explicit and test-locked, preventing nondeterministic target flipping or regressions in interrupt priority.
 
 ### Milestone 3c — Policy Model + Boundary-Safe Update Pipeline (3–4 hrs)
-- [ ] Implement `Policy` state in `GameState` using the schema from section **4.2** (no extra fields).
-- [ ] Add concrete default policy values:
-- [ ] `fight_or_avoid = Fight`.
-- [ ] `stance = Balanced`.
-- [ ] `target_priority = [Nearest, LowestHp]`.
-- [ ] `retreat_hp_threshold = 35`.
-- [ ] `auto_heal_if_below_threshold = None`.
-- [ ] `position_intent = HoldGround`.
-- [ ] `resource_aggression = Conserve`.
-- [ ] `exploration_mode = Thorough`.
-- [ ] Add `PolicyUpdate` payload variants to mutate each policy field independently.
-- [ ] Add `Game::apply_policy_update` and enforce timing rule: updates are accepted only while paused at a tick boundary (`Interrupted` or `PausedAtBoundary` state), otherwise rejected.
-- [ ] Extend journal input payloads with `PolicyUpdate { tick_boundary, update }` and append every accepted update with current boundary tick.
-- [ ] Extend replay to apply journaled policy updates at the recorded boundary before the next simulation tick.
-- [ ] Add tests for accepted/rejected timing and replay equivalence (`same seed + same journal => same final hash`).
+- [x] Implement `Policy` state in `GameState` using the schema from section **4.2** (no extra fields).
+- [x] Add concrete default policy values:
+- [x] `fight_or_avoid = Fight`.
+- [x] `stance = Balanced`.
+- [x] `target_priority = [Nearest, LowestHp]`.
+- [x] `retreat_hp_threshold = 35`.
+- [x] `auto_heal_if_below_threshold = None`.
+- [x] `position_intent = HoldGround`.
+- [x] `resource_aggression = Conserve`.
+- [x] `exploration_mode = Thorough`.
+- [x] Add `PolicyUpdate` payload variants to mutate each policy field independently.
+- [x] Add `Game::apply_policy_update` and enforce timing rule: updates are accepted only while paused at a tick boundary (`Interrupted` or `PausedAtBoundary` state), otherwise rejected.
+- [x] Extend journal input payloads with `PolicyUpdate { tick_boundary, update }` and append every accepted update with current boundary tick.
+- [x] Extend replay to apply journaled policy updates at the recorded boundary before the next simulation tick.
+- [x] Add tests for accepted/rejected timing and replay equivalence (`same seed + same journal => same final hash`).
 **Pass 3c Exit Criteria:**
 - **a) User Experience:** While paused, the player can change policy knobs and trust that updates apply exactly when intended (not mid-tick), with invalid timing rejected cleanly.
 - **b) Progress toward vision:** Policy control becomes a concrete game mechanism rather than a design placeholder, and replay/save flows now include policy decisions as first-class inputs.

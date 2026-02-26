@@ -153,6 +153,7 @@ pub struct GameState {
     pub items: SlotMap<ItemId, Item>,
     pub player_id: EntityId,
     pub auto_intent: Option<AutoExploreIntent>,
+    pub policy: Policy,
 }
 
 #[cfg(test)]

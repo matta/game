@@ -69,6 +69,7 @@ pub struct AdvanceResult {
 pub enum GameError {
     InvalidChoice,
     PromptMismatch,
+    NotAtPauseBoundary,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,4 +100,79 @@ pub struct AutoExploreIntent {
 pub enum GameMode {
     Ironman,
     Easy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FightMode {
+    Fight,
+    Avoid,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Stance {
+    Aggressive,
+    Balanced,
+    Defensive,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TargetTag {
+    Nearest,
+    LowestHp,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PositionIntent {
+    HoldGround,
+    AdvanceToMelee,
+    FleeToNearestExploredTile,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Aggro {
+    Conserve,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExploreMode {
+    Thorough,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Policy {
+    pub fight_or_avoid: FightMode,
+    pub stance: Stance,
+    pub target_priority: Vec<TargetTag>,
+    pub retreat_hp_threshold: u8,
+    pub auto_heal_if_below_threshold: Option<u8>,
+    pub position_intent: PositionIntent,
+    pub resource_aggression: Aggro,
+    pub exploration_mode: ExploreMode,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            fight_or_avoid: FightMode::Fight,
+            stance: Stance::Balanced,
+            target_priority: vec![TargetTag::Nearest, TargetTag::LowestHp],
+            retreat_hp_threshold: 35,
+            auto_heal_if_below_threshold: None,
+            position_intent: PositionIntent::HoldGround,
+            resource_aggression: Aggro::Conserve,
+            exploration_mode: ExploreMode::Thorough,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PolicyUpdate {
+    FightMode(FightMode),
+    Stance(Stance),
+    TargetPriority(Vec<TargetTag>),
+    RetreatHpThreshold(u8),
+    AutoHealIfBelowThreshold(Option<u8>),
+    PositionIntent(PositionIntent),
+    ResourceAggression(Aggro),
+    ExplorationMode(ExploreMode),
 }

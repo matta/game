@@ -30,6 +30,24 @@ impl AppState {
     pub fn tick(&mut self, game: &mut Game, keys_pressed: &[KeyCode]) {
         let mut advance_result = None;
 
+        let handle_policy = |game: &mut Game| {
+            if keys_pressed.contains(&KeyCode::M) {
+                let next = match game.state().policy.fight_or_avoid {
+                    core::FightMode::Fight => core::FightMode::Avoid,
+                    core::FightMode::Avoid => core::FightMode::Fight,
+                };
+                let _ = game.apply_policy_update(core::PolicyUpdate::FightMode(next));
+            }
+            if keys_pressed.contains(&KeyCode::T) {
+                let next = match game.state().policy.stance {
+                    core::Stance::Aggressive => core::Stance::Balanced,
+                    core::Stance::Balanced => core::Stance::Defensive,
+                    core::Stance::Defensive => core::Stance::Aggressive,
+                };
+                let _ = game.apply_policy_update(core::PolicyUpdate::Stance(next));
+            }
+        };
+
         // Input handling
         match &self.mode {
             AppMode::Paused | AppMode::AutoPlay => {
@@ -46,6 +64,10 @@ impl AppState {
 
                 if keys_pressed.contains(&KeyCode::Right) && matches!(self.mode, AppMode::Paused) {
                     advance_result = Some(game.advance(1));
+                }
+
+                if matches!(self.mode, AppMode::Paused) {
+                    handle_policy(game);
                 }
             }
             AppMode::PendingPrompt { prompt_id, auto_play_suspended, interrupt } => {
@@ -82,6 +104,8 @@ impl AppState {
                         }
                     }
                 }
+
+                handle_policy(game);
             }
             AppMode::Finished => {
                 // No inputs valid after completion
