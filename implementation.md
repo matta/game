@@ -96,6 +96,7 @@ impl Game {
   ) -> Result<(), GameError>;
   pub fn apply_policy_update(&mut self, update: PolicyUpdate) -> Result<(), GameError>;
   pub fn current_tick(&self) -> u64;
+  pub fn observation(&self) -> Observation;
   pub fn snapshot_hash(&self) -> u64;
 }
 ```
@@ -151,10 +152,41 @@ MVP compatibility guarantee: journal replay is supported only when `build_id` an
 ## 3.2 Core / App Communication Contract
 
 - `app` provides **pure inputs**: `InputPayload`.
-- `core` returns **pure outputs**: `Interrupt`, `CoreView`, `LogEvent`.
+- `core` returns **pure outputs**: `Interrupt`, `Observation`, `LogEvent`.
 - `app` never reads or writes `core` internals except through the public API.
 
 The `app` crate controls the execution loop, deciding whether to auto-explore or wait for user input (e.g., when paused). The `core` only receives inputs that mutate simulation state, remaining entirely ignorant of UI concepts.
+
+`Observation` is strictly engine-agnostic state:
+
+```rust
+pub struct Observation {
+  pub visible_tiles: Vec<TileObservation>,     // TileKind only; no glyph/color
+  pub visible_actors: Vec<ActorObservation>,   // logical entities in view
+  pub player: PlayerObservation,               // logical stats and statuses
+  pub current_exploration_target: Option<Pos>, // why auto-explore is moving
+}
+
+pub struct TileObservation {
+  pub pos: Pos,
+  pub tile: TileKind,
+}
+
+pub struct ActorObservation {
+  pub id: EntityId,
+  pub kind: ActorKind,
+  pub pos: Pos,
+  pub status_tags: Vec<StatusTag>,
+}
+
+pub struct PlayerObservation {
+  pub hp: i32,
+  pub max_hp: i32,
+  pub statuses: Vec<StatusTag>,
+}
+```
+
+Explicitly excluded from `Observation`: glyphs, colors, fonts, panel layout, animation/motion cues, and any UI-specific formatting.
 
 Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
 
