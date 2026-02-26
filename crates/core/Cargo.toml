@@ -1,0 +1,9 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand_chacha = { workspace = true }
+slotmap = { workspace = true }
+xxhash-rust = { workspace = true }

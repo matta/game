@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/app",
+    "crates/tools",
+]
+resolver = "2"
+
+[workspace.dependencies]
+core = { path = "crates/core" }
+macroquad = "0.4"
+rand_chacha = "0.10.0"
+slotmap = "1.0"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
