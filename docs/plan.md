@@ -474,7 +474,10 @@ async fn main() {
 - [x] Add rustfmt + clippy.
 - [x] Basic CI (test + lint).
 - [x] README.
-*Done when: `cargo test` passes cleanly.*
+**Exit Criteria:**
+- **a) User Experience:** None. This is pure developer scaffolding.
+- **b) Progress toward vision:** Sets up the open-source baseline (Vision 6.5).
+- **c) Architecture & Maintainability:** Establishes the 3-crate layout protecting the deterministic layer (`core`). CI/CD pipelines, cargo formatting, and basic linting are in place, confirming a sustainable development environment.
 
 ## Milestone 1 — CoreSim Skeleton & Initial UI (10–12 hrs)
 - [x] Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
@@ -485,7 +488,10 @@ async fn main() {
 - [x] Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
 - [x] Implement single-clock auto loop (synchronous batch stepping) with pause-at-next-tick-boundary behavior.
 - [x] Implement Player + 1 enemy, turn engine, and fake loot interrupt.
-*Done when: repeated runs with the same seed/journal produce identical final snapshot hash via headless replay API.*
+**Exit Criteria:**
+- **a) User Experience:** A rudimentary static ASCII grid appears, rendering a player, an enemy, and simulating an interrupt. Visuals are purely functional debug outputs.
+- **b) Progress toward vision:** Validates the strict turn-based simulation model (Vision 2.3) and the technical constraint of seed-based determinism (Vision 6.4).
+- **c) Architecture & Maintainability:** The generative arena memory management (`slotmap`) is in place. Crucially, the headless replay API and determinism contract are proven strong, meaning any future bug can be perfectly reproduced by copying the input journal.
 
 ## Milestone 2a — Basic Pathing & Interrupt Loop (10–12 hrs)
 - [ ] Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
@@ -494,7 +500,10 @@ async fn main() {
 - [ ] Emit `LogEvent::AutoReasonChanged { reason, target, path_len }` whenever target/reason changes.
 - [ ] Render ASCII map and display event log in `app`.
 - [ ] Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
-*Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and intent/reason changes are inspectable in the event log.*
+**Exit Criteria:**
+- **a) User Experience:** The player can watch a character automatically traverse a dungeon, pausing natively for rudimentary item, enemy, or choice pop-up panels. Intent tracing is visible in the UI event log.
+- **b) Progress toward vision:** The "One-Sentence Loop" (auto-explore, event interrupt) is visibly functioning (Vision 2.1).
+- **c) Architecture & Maintainability:** Pathing and frontier selection are decoupled from UI frames. The `AutoExploreIntent` logging mechanism ensures complex AI decisions can be analyzed and logged without console spam.
 
 ## Milestone 2b — FOV & Exploration Intelligence (6–8 hrs)
 - [ ] Implement minimum viable deterministic FOV in `core` (simple shadowcasting or equivalent simple method).
@@ -502,7 +511,11 @@ async fn main() {
 - [ ] Implement danger scoring v0: avoid known hazard tiles only.
 - [ ] Treat closed doors as walls until explicitly opened through an interrupt (no full door simulation in 2b).
 - [ ] Expand `AutoReason` usage for FOV/hazard-driven decisions.
-*Done when: explore remains coherent under FOV constraints and hazard avoidance v0, without complex door/hazard simulation.*
+**Exit Criteria:**
+- **a) User Experience:** The map obscures unknown tiles, bringing a feeling of discovery. Movement looks intentional despite constrained vision. Hazards are avoided naturally.
+- **b) Progress toward vision:** Reinforces the "decisions matter" pillar (Vision 1.1). Managing incomplete information becomes part of the core fantasy.
+- **c) Architecture & Maintainability:** FOV algorithms remain fully deterministic within `core`. Spatial algorithms are abstracted to allow test injection of fake hazard layouts.
+
 Scope guard: advanced door/hazard simulation and richer danger scoring defer to Milestone 6 or post-MVP.
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
@@ -514,54 +527,67 @@ Scope guard: advanced door/hazard simulation and richer danger scoring defer to 
 - [ ] Implement a micro-set of test content (2 weapons, 1 consumable, 2 perks) to validate policy behaviors.
 - [ ] Wire UI to update policy knobs.
 - [ ] Add baseline fairness instrumentation: death-cause reason codes, enemy-encounter `ThreatSummary`, and a compact per-turn threat trace.
-*Done when: automated combat resolves from policy/build choices, opening swap costs are explicit/time-costed, encounter threat summaries are visible pre-commit, and death traces explain what happened with spatially naive positioning.*
+**Exit Criteria:**
+- **a) User Experience:** The player uses UI to tweak loadouts, priorities, and retreat conditions on pause. Threat summaries present transparent "fair" tactical information pre-combat. Death screens definitively explain why the player died.
+- **b) Progress toward vision:** Combat policy controls (Vision 3.2) implemented. Validates "Policy over micromovement" principle (Vision 1.2, 8.1).
+- **c) Architecture & Maintainability:** Action time-costing proven deterministic. The system handles out-of-band state changes (policy tweaks mid-interrupt) without corrupting the append-only `InputJournal`. Death-trace logs become a first-class debugging output.
+
 Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) defers to post-MVP.
 
 ## Milestone 4 — Floors + Branching (12–15 hrs)
 - [ ] Multiple floors (strict one-way descent).
 - [ ] Branching paths (modifies spawn tables/environment).
 - [ ] No overworld selector or ascending mechanics.
-*Done when: route choice matters.*
+**Exit Criteria:**
+- **a) User Experience:** Player traverses multiple distinct floors, picking between branching paths that subtly alter the environment and challenges.
+- **b) Progress toward vision:** Moving toward the "Great 30-Minute Session" (Vision 1.3). Implements the hybrid map model (Vision 4.1). Forward momentum enforced by strict one-way descent.
+- **c) Architecture & Maintainability:** World generation logic is encapsulated, ensuring that dynamically generating floors maintains absolute seed-determinism and doesn't pollute global state.
 
 ## Milestone 5 — Content Pass (15–18 hrs)
 - [ ] Populate `core::content`: ~15 items, ~10 perks, 2 gods.
 - [ ] 6–8 enemy types, 1 boss.
 - [ ] 3–5 vault templates.
 - [ ] **Weirdness Quota:** At least 5 items that modify rule systems (not just stat sticks). At least 3 perks that alter core mechanics (timing, targeting, economy).
-*Done when: 3+ viable archetypes exist meeting the Weirdness Quota.*
+**Exit Criteria:**
+- **a) User Experience:** Substantial content density. The player encounters bosses, diverse enemies, and items with weird, rule-breaking properties, enabling wildly asymmetric build synergies.
+- **b) Progress toward vision:** "Deep buildcrafting" (Vision 1.2) is tangibly achieved. Items feel unique, not like stat sticks (Vision 1.1).
+- **c) Architecture & Maintainability:** Proves viability of defining engine logic alongside content (DR-008). Tests whether hardcoding item behaviors locally scales maintainably across the MVP boundaries.
 
 ## Milestone 6 — Fairness Tooling (8–10 hrs)
 - [ ] Refine threat tags and static encounter facts.
 - [ ] Seed display + copy.
 - [ ] Determinism hash.
 - [ ] Death-recap UI using reason codes from Milestone 3.
-*Done when: deaths are reproducible and explainable to the player.*
+**Exit Criteria:**
+- **a) User Experience:** Gameplay feels meticulously fair. The player can easily copy a run seed and review exact reason codes for their death.
+- **b) Progress toward vision:** "Lethal-but-fair gameplay" and "No opaque randomness" (Vision 1.4, 8.5) physically realized.
+- **c) Architecture & Maintainability:** Deepens determinism tooling. Ensures the game is fundamentally debuggable using player-submitted crash seeds as reliable regression tests.
 
 ## Milestone 7 — Persistence, Replay, and Easy Mode Checkpoints (8–10 hrs)
 - [ ] Implement append-only `InputJournal` logging in memory, writing atomically on new inputs.
 - [ ] Load games by replaying journal events from tick 0.
 - [ ] Add deterministic checkpoint marker generation at engine-authored boundaries.
 - [ ] Implement death flow to select checkpoint and restore via truncating journal and replaying from tick 0.
-*Done when: save/load, replay, and checkpoint time travel use the exact same code path and are reliable.*
+**Exit Criteria:**
+- **a) User Experience:** Player can safely close the game and perfectly resume their run. If playing "easy mode," deaths gracefully bounce the player back to a natural progression checkpoint to try a different policy.
+- **b) Progress toward vision:** Finalizes the targeted Saving Model (Ironman vs Checkpoint) (Vision 6.3).
+- **c) Architecture & Maintainability:** Proves the append-only `InputJournal` replay loop in practice. Fast-forwarding simulation entirely removes the maintenance burden of generic state serialization (serde) snapshots.
 
 ## Milestone 8 — Release Packaging (8–10 hrs)
 - [ ] Versioning and final balance pass.
 - [ ] macOS + Linux builds.
 - [ ] Run summary screen.
 - [ ] GitHub release or Itch upload.
-*Done when: a friend can download and play.*
+**Exit Criteria:**
+- **a) User Experience:** A cohesive, polished client. Clean fonts, finalized colors, smooth input polling, and an intuitive run-summary screen. Completely playable as a standalone desktop app.
+- **b) Progress toward vision:** Finalizes the Desktop target (Vision 6.1). Achieves the fully integrated MVP session length.
+- **c) Architecture & Maintainability:** CI pipelines successfully yield distributable binaries. Final profiling guarantees UI responsiveness never stutters during synchronous auto-explore batches.
 
 ---
 
 # 9. Deployment Plan
 
-Primary:
-- GitHub Releases
-
-Secondary:
-- Itch.io distribution
-
-Windows support: optional later.
+None.
 
 ---
 
