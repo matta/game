@@ -1,5 +1,5 @@
 use app::app_loop::{AppMode, AppState};
-use core::{ContentPack, GameMode, Game};
+use core::{ContentPack, Game, GameMode};
 use macroquad::prelude::KeyCode;
 
 #[test]

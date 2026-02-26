@@ -62,7 +62,9 @@ async fn main() {
         }
 
         let status = match app_state.mode {
-            app::app_loop::AppMode::PendingPrompt { .. } => "INTERRUPT: Loot Found! (Press 'L' to Keep & Resume)",
+            app::app_loop::AppMode::PendingPrompt { .. } => {
+                "INTERRUPT: Loot Found! (Press 'L' to Keep & Resume)"
+            }
             app::app_loop::AppMode::Finished => "Finished (Victory!)",
             app::app_loop::AppMode::AutoPlay => "Auto-Explore ON (Space to pause)",
             app::app_loop::AppMode::Paused => "Paused (Space to Auto-Explore, Right to step)",

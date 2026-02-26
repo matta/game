@@ -1,4 +1,4 @@
-use core::{AdvanceStopReason, Game, ChoicePromptId, Interrupt};
+use core::{AdvanceStopReason, ChoicePromptId, Game, Interrupt};
 use macroquad::prelude::KeyCode;
 
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -39,9 +39,7 @@ impl AppState {
                             game.request_pause();
                             AppMode::Paused
                         }
-                        _ => {
-                            AppMode::Paused
-                        }
+                        _ => AppMode::Paused,
                     };
                 }
 
@@ -52,16 +50,12 @@ impl AppState {
             AppMode::PendingPrompt { prompt_id, auto_play_suspended } => {
                 let id = *prompt_id;
                 let resume = *auto_play_suspended;
-                
+
                 if keys_pressed.contains(&KeyCode::L) {
                     game.apply_choice(id, core::Choice::KeepLoot)
                         .expect("Failed to apply pending choice");
-                        
-                    self.mode = if resume {
-                        AppMode::AutoPlay
-                    } else {
-                        AppMode::Paused
-                    };
+
+                    self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
                 }
             }
             AppMode::Finished => {
