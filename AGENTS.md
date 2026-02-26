@@ -1,4 +1,4 @@
-- Use @implementation.md for planning; keep checkmarks up to date.
+- Use @docs/plan.md for planning; keep checkmarks up to date.
 - Use a TDD approach to implement new features, and fix bugs.
 - Ensure the following pass with no warnings or errors:
     - cargo clippy

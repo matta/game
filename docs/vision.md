@@ -4,7 +4,7 @@ Author: Matt Armstrong
 Status: Frozen (Archival, Non-Normative)  
 Scope: 1.0 MVP (20–40 minute runs)
 
-Normative source for active implementation decisions: `implementation.md`.
+Normative source for active implementation decisions: `plan.md`.
 
 ---
 
@@ -205,8 +205,3 @@ Balanced:
 # Status
 
 Interrogation Phase: COMPLETE  
-Ready to proceed to:
-- Architecture specification
-- Module layout
-- CoreSim API design
-- Implementation roadmap from empty git repo to MVP 1.0

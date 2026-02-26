@@ -612,7 +612,7 @@ Rationale:
 ## DR-002: Static Threat Display over Tactical Forecasting
 **Context:** Initial plan required heuristic simulation of future outcomes (`expected_damage_band`, `escape_feasibility`) during enemy encounters.
 **Decision:** Replaced dynamic forecasting with exposing static facts (danger tags, attack/defense stats).
-**Rationale:** Automated tactical forecasting is a huge implementation risk, prone to bugs and high maintenance as content changes. Mastery should rely on the player learning the system, not an in-game analyst.
+**Rationale:** Automated tactical forecasting is an implementation risk, prone to bugs and high maintenance as content changes. Mastery should rely on the player learning the system, not an in-game analyst.
 
 ## DR-003: Strict One-Way Descent over Overworld Branches
 **Context:** Goal was to have multiple floors, an overworld selector, and ascending/descending mechanics.
