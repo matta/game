@@ -657,13 +657,82 @@ Execution guardrails for all Milestone 3 passes:
 Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) and predictive combat forecasting defer to post-MVP.
 
 ## Milestone 4 — Floors + Branching (12–15 hrs)
-- [ ] Multiple floors (strict one-way descent).
-- [ ] Branching paths (modifies spawn tables/environment).
-- [ ] No overworld selector or ascending mechanics.
+
+Execution guardrails for all Milestone 4 passes:
+- [ ] Execute passes strictly in order: `4a -> 4b -> 4c -> 4d -> 4e`.
+- [ ] Use TDD in every pass: add failing test(s) first, then implement the minimum code to pass.
+- [ ] After each pass, run all required checks with no warnings/errors: `cargo fmt -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`.
+- [ ] Preserve DR-003 constraints throughout: strict one-way descent, no overworld selector, no ascending mechanics.
+
+### Milestone 4a — Floor State + Deterministic Generator Contract (3–4 hrs)
+- [ ] Introduce explicit floor progression state in `core` with fixed MVP constants: `MAX_FLOORS = 3`, starting floor index `1`.
+- [ ] Add deterministic floor-generation API in `core` with full input contract: `(run_seed, floor_index, branch_profile) -> generated_floor`.
+- [ ] Define generated floor payload to include at minimum: map tiles, player entry tile, one down-stairs tile, enemy/item spawn placements.
+- [ ] Keep only one active floor state in memory at a time (prior floor state discarded on descent; no backtracking storage).
+- [ ] Enforce deterministic floor seed derivation from `(run_seed, floor_index, branch_profile)` using integer-only logic.
+- [ ] Add unit test: identical `(seed, floor, branch)` inputs produce byte-identical generated floor outputs.
+- [ ] Add unit test: changing `floor_index` changes generated floor output for fixed seed/branch.
+- [ ] Add unit test: generated floor always has a walkable route from entry tile to down-stairs tile.
+**Pass 4a Exit Criteria:**
+- **a) User Experience:** None directly yet; floor transitions may still be single-floor in runtime behavior, but generation primitives are in place.
+- **b) Progress toward vision:** Establishes concrete multi-floor infrastructure instead of a single static map.
+- **c) Architecture & Maintainability:** Floor generation becomes deterministic, testable, and isolated from UI concerns.
+
+### Milestone 4b — One-Way Descent Runtime Flow (3–4 hrs)
+- [ ] Add explicit down-stairs semantics to runtime map flow (`TileKind` or equivalent) and place exactly one reachable down-stairs per floor.
+- [ ] Implement descent trigger: when player reaches down-stairs, pause via a deterministic floor-transition interrupt before generating the next floor.
+- [ ] Implement `Descend` choice handling: increment floor index, generate next floor, relocate player to next floor entry tile, recompute FOV/discovery.
+- [ ] Enforce one-way rule in runtime APIs and input handling: no `Ascend` choice, no up-stairs traversal, no return to prior floors.
+- [ ] On floor `MAX_FLOORS`, resolve descent target as run completion (or boss-floor completion path) with deterministic finish behavior.
+- [ ] Add integration test: fixed-seed run descends from floor 1 to floor 2 and receives a different deterministic map state.
+- [ ] Add integration test: no legal input path can move from floor N back to floor N-1.
+- [ ] Add integration test: floor transition interrupt occurs once per descent event and does not spam while paused on stairs.
+**Pass 4b Exit Criteria:**
+- **a) User Experience:** The run now has visible forward momentum: reaching stairs moves the player into a new floor context.
+- **b) Progress toward vision:** Implements strict one-way dungeon descent as a core loop element, consistent with DR-003.
+- **c) Architecture & Maintainability:** Transition behavior is explicit and regression-tested, avoiding hidden floor-state coupling.
+
+### Milestone 4c — Branch Choice + Persistent Branch Profile (3–4 hrs)
+- [ ] Introduce exactly one MVP branch commitment point: branch prompt appears on first descent only (floor 1 -> floor 2 transition).
+- [ ] Define two fixed branch profiles for MVP and freeze their modifiers:
+- [ ] `Branch A`: increases enemy density on floors 2–3 (`+1` enemy group spawn attempt per floor).
+- [ ] `Branch B`: increases hazard density on floors 2–3 (`+3` hazard tiles per floor, deterministic placement rules).
+- [ ] Persist branch commitment in run state and thread it into deterministic floor generation for all subsequent floors.
+- [ ] Ensure branch prompt is emitted exactly once per run and never re-offered after commitment.
+- [ ] Add unit test: same seed + same branch => identical floor 2/3 generation.
+- [ ] Add unit test: same seed + different branch => measurable deterministic difference in floor 2/3 spawn/hazard outputs.
+- [ ] Add integration test: branch prompt appears at the intended transition and branch choice changes later floor characteristics.
+**Pass 4c Exit Criteria:**
+- **a) User Experience:** The player makes a meaningful branch decision that visibly changes upcoming floors.
+- **b) Progress toward vision:** Delivers branching dungeon structure in MVP scope without requiring overworld navigation.
+- **c) Architecture & Maintainability:** Branch effects are explicit, bounded, and deterministic rather than ad-hoc map mutations.
+
+### Milestone 4d — Floor Safety/Retreat Guarantees + Spawn Rules (1–2 hrs)
+- [ ] Implement stair-adjacent sanctuary spawn rule per floor transition: no enemy can spawn on entry tile or immediate adjacent tiles.
+- [ ] Ensure down-stairs tile is never blocked by walls, hazards, or enemy spawn occupancy at generation time.
+- [ ] Add deterministic spawn ordering/tie-break rules for per-floor actor placement to prevent cross-platform drift.
+- [ ] Add unit test: sanctuary rule holds across generated floors for multiple fixed seeds.
+- [ ] Add unit test: stairs tile remains reachable and unoccupied at floor start.
+**Pass 4d Exit Criteria:**
+- **a) User Experience:** Entering a new floor feels fair; the player gets a stable foothold instead of immediate unavoidable collapse.
+- **b) Progress toward vision:** Supports lethal-but-fair pacing while preserving forward progression.
+- **c) Architecture & Maintainability:** Generator invariants are encoded as tests, reducing regressions from future content tuning.
+
+### Milestone 4e — App/UI Wiring + Multi-Floor Smoke Coverage (1–2 hrs)
+- [ ] Surface current floor index and committed branch in app HUD/log output.
+- [ ] Add branch-choice and descent prompt handling in app loop with explicit key bindings.
+- [ ] Add end-to-end smoke test: fixed seed run reaches floor 3 through one branch path and remains replay-stable.
+- [ ] Add companion smoke test for the alternate branch path confirming deterministic divergence in floor characteristics.
+- [ ] Add regression test: app exposes no overworld selector and no ascend action bindings.
+**Pass 4e Exit Criteria:**
+- **a) User Experience:** Multi-floor progression and branch identity are visible and understandable during normal play.
+- **b) Progress toward vision:** Completes milestone-level playability for floors + branches, not just headless core behavior.
+- **c) Architecture & Maintainability:** App/core contract for floor transitions is validated by deterministic integration tests.
+
 **Exit Criteria:**
-- **a) User Experience:** Player traverses multiple distinct floors, picking between branching paths that subtly alter the environment and challenges.
-- **b) Progress toward vision:** Moving toward the "Great 30-Minute Session" (Vision 1.3). Implements the hybrid map model (Vision 4.1). Forward momentum enforced by strict one-way descent.
-- **c) Architecture & Maintainability:** World generation logic is encapsulated, ensuring that dynamically generating floors maintains absolute seed-determinism and doesn't pollute global state.
+- **a) User Experience:** Player traverses multiple distinct floors with one-way descent and makes a branch commitment that materially alters subsequent floors.
+- **b) Progress toward vision:** Advances the 20–40 minute session arc with structured floor progression while honoring DR-003 one-way constraints.
+- **c) Architecture & Maintainability:** Floor generation and transition logic are deterministic, bounded, and covered by unit + integration regressions.
 
 ## Milestone 5 — Content Pass (15–18 hrs)
 - [ ] Populate `core::content`: ~15 items, ~10 perks, 2 gods.
