@@ -203,10 +203,10 @@ pub enum LogEvent {
 ```
 
 Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
-Action-cost requirement: automatic loadout swaps are in-world actions that consume ticks; no free pre-combat equipment changes.
+Action-cost requirement: loadout swaps are manual in-world actions that consume ticks; no free pre-combat equipment changes.
 MVP policy timing split:
-- Loadout-affecting updates (equip/swap) consume time via `SwapLoadout` action(s).
-- Non-loadout policy knob edits (priority/stance/thresholds) are applied at pause boundaries without direct tick cost.
+- Loadout-affecting updates (equip/swap) are issued manually during an interrupt pause and consume time via `SwapLoadout` action(s).
+- Policy knob edits (priority/stance/thresholds) are applied at pause boundaries without direct tick cost.
 
 This contract enables a headless `tools/replay_runner` that exercises `core` without any rendering dependency.
 
@@ -277,12 +277,10 @@ pub struct Policy {
   pub fight_or_avoid: FightMode,
   pub stance: Stance,
   pub target_priority: Vec<TargetTag>,
-  pub consume_hp_threshold: u8,
   pub retreat_hp_threshold: u8,
   pub position_intent: PositionIntent, // MVP-restricted intent set
   pub resource_aggression: Aggro,
   pub exploration_mode: ExploreMode,
-  pub loadout_rule: LoadoutRule, // may trigger time-costing SwapLoadout actions
 }
 
 pub enum PositionIntent {
@@ -307,7 +305,7 @@ All spatial algorithms live strictly within `core`, with no dependency on extern
 ## 4.5 Loadout Action Semantics (MVP)
 
 - `SwapLoadout` is a first-class simulation action with tick cost (same timing model as other actor actions).
-- Auto behavior may choose `SwapLoadout` based on `loadout_rule`, but it never bypasses turn economy.
+- `SwapLoadout` is strictly a manual command issued by the player upon an interrupt pause; auto behavior never bypasses turn economy to swap gear.
 - Enemy reactions occur according to normal turn ordering; swapping can expose player to incoming actions.
 - Emit deterministic log events for executed swaps so replay/debug can explain pre-combat openings.
 
@@ -326,6 +324,7 @@ Interrupt types (MVP subset):
 
 - LootFound
 - EnemyEncounter (first-sighting pre-commit stop)
+- HpThresholdReached (drops below `retreat_hp_threshold`, pausing for manual intervention)
 - BranchChoice
 - GodOffer
 - CampChoice
@@ -504,9 +503,9 @@ Scope guard: advanced door/hazard simulation and richer danger scoring defer to 
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
 - Multi-enemy encounters.
-- Implement MVP `Policy` controls (Target priority, Stance modifiers, Consumable thresholds, Retreat logic, restricted `PositionIntent`, pre-combat loadout rule).
+- Implement MVP `Policy` controls (Target priority, Stance modifiers, Retreat logic, restricted `PositionIntent`).
 - Restrict policy updates to paused tick boundaries and journal every accepted update with boundary tick.
-- Implement `SwapLoadout` as a time-costing simulation action (including auto-trigger from `loadout_rule`).
+- Implement `SwapLoadout` as a time-costing simulation action.
 - Ensure first-sighting `EnemyEncounter` interrupts occur before opening combat actions.
 - Implement a micro-set of test content (2 weapons, 1 consumable, 2 perks) to validate policy behaviors.
 - Wire UI to update policy knobs.
@@ -657,3 +656,8 @@ pub fn sword_of_healing() -> ItemDef {
 }
 ```
 This is a calculated risk. It borders on "OOP morass" where entities own their own logic, breaking strict data/logic separation. However, given the tiny MVP scope (~15 items, ~10 perks), the velocity gained by avoiding a complex data schema engine far outweighs the structural impurity. If the game succeeds and scaling to 200+ items is required, this debt must be paid down by extracting a pure data schema.
+
+## DR-009: No Auto-Consumption of Inventory or Loadout Rules
+**Context:** The `Policy` struct initially included `loadout_rule` (when to swap weapons) and `consume_hp_threshold` (when to automatically drink a potion).
+**Decision:** Cut both features. Auto-explore will automate movement and attacking, but will never automatically spend turn economy to use inventory items or swap equipment.
+**Rationale:** Building an AI logic block to safely evaluate when it is "worth" spending a turn to swap a weapon or drink a limited consumable is complex. A misjudgment by the AI (e.g., spending 2 turns to swap to a bow while flanked by a goblin, leading to death) feels inherently "unfair" to the player. By forcing the player to handle inventory usage manually during the guaranteed `EnemyEncounter` or `Retreat` pause interrupts, we avoid writing brittle evaluator AI and preserve the player's agency over their most limited resources.
