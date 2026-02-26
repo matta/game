@@ -165,7 +165,6 @@ pub struct CheckpointMarker {
 
 pub enum CheckpointReason {
   GodChoiceResolved,
-  LevelChanged,
   BranchCommitted,
   CampResolved,
   PerkChosen,
@@ -245,7 +244,7 @@ pub fn replay_to_end(
 
 ## 3.4 Easy Mode Checkpoint Model
 
-- Easy mode uses engine-authored checkpoint markers at deterministic boundaries (e.g., resolved god choice, level change, branch commitment, resolved camp).
+- Easy mode uses engine-authored checkpoint markers at deterministic boundaries (e.g., resolved god choice, branch commitment, resolved camp), omitting per-level checkpoints to preserve tension.
 - Build-identity checkpoints are also supported (`PerkChosen`, `BuildDefiningLootResolved`).
 - On death, player may select any unlocked checkpoint.
 - **Restore mechanic:** Load the `InputJournal`, truncate the `inputs` list to the checkpoint marker's `input_seq`, and replay deterministically from tick 0.
@@ -693,11 +692,12 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Transition behavior is explicit and regression-tested, avoiding hidden floor-state coupling.
 
 ### Milestone 4c — Branch Choice + Persistent Branch Profile (3–4 hrs)
-- [ ] Introduce exactly one MVP branch commitment point: branch prompt appears on first descent only (floor 1 -> floor 2 transition).
+- [ ] Introduce exactly one MVP branch commitment point: branch prompt appears on first descent only (floor 1 -> floor 2 transition). Merge the branch selection prompt directly into the descent interrupt to avoid back-to-back modal popups (mitigating Interrupt Fatigue).
 - [ ] Define two fixed branch profiles for MVP and freeze their modifiers:
 - [ ] `Branch A`: increases enemy density on floors 2–3 (`+1` enemy group spawn attempt per floor).
 - [ ] `Branch B`: increases hazard density on floors 2–3 (`+3` hazard tiles per floor, deterministic placement rules).
 - [ ] Persist branch commitment in run state and thread it into deterministic floor generation for all subsequent floors.
+- [ ] Issue a checkpoint marker on Branch Commitment, but omit per-level checkpoints to preserve tension and mitigate the Emotional Dilution risk.
 - [ ] Ensure branch prompt is emitted exactly once per run and never re-offered after commitment.
 - [ ] Add unit test: same seed + same branch => identical floor 2/3 generation.
 - [ ] Add unit test: same seed + different branch => measurable deterministic difference in floor 2/3 spawn/hazard outputs.
@@ -709,10 +709,13 @@ Execution guardrails for all Milestone 4 passes:
 
 ### Milestone 4d — Floor Safety/Retreat Guarantees + Spawn Rules (1–2 hrs)
 - [ ] Implement stair-adjacent sanctuary spawn rule per floor transition: no enemy can spawn on entry tile or immediate adjacent tiles.
+- [ ] Implement runtime sanctuary rule: enemies treat the stair/'entry' tile as strictly non-walkable during A* and neighbor expansion.
+- [ ] Implement encounter-reset logic: if the player flees onto a sanctuary tile, purge the active threat state and transition out of combat mode.
 - [ ] Ensure down-stairs tile is never blocked by walls, hazards, or enemy spawn occupancy at generation time.
 - [ ] Add deterministic spawn ordering/tie-break rules for per-floor actor placement to prevent cross-platform drift.
 - [ ] Add unit test: sanctuary rule holds across generated floors for multiple fixed seeds.
 - [ ] Add unit test: stairs tile remains reachable and unoccupied at floor start.
+- [ ] Add unit test: enemies cannot pathfind onto the sanctuary tile even if the player is standing on it.
 **Pass 4d Exit Criteria:**
 - **a) User Experience:** Entering a new floor feels fair; the player gets a stable foothold instead of immediate unavoidable collapse.
 - **b) Progress toward vision:** Supports lethal-but-fair pacing while preserving forward progression.
