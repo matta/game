@@ -119,15 +119,7 @@ fn draw_event_log(game: &Game, left: f32, top: f32, line_height: f32) {
     let start = events.len().saturating_sub(10);
     for (idx, event) in events[start..].iter().enumerate() {
         let line = match event {
-            LogEvent::AutoReasonChanged { reason, target, path_len } => {
-                format!(
-                    "auto {} -> ({}, {}) len={}",
-                    auto_reason_label(*reason),
-                    target.x,
-                    target.y,
-                    path_len
-                )
-            }
+            LogEvent::AutoReasonChanged { reason, .. } => auto_reason_text(*reason).to_string(),
             LogEvent::EnemyEncountered { enemy } => format!("enemy encountered {:?}", enemy),
             LogEvent::ItemPickedUp => "picked up item".to_string(),
             LogEvent::ItemDiscarded => "discarded item".to_string(),
@@ -147,12 +139,12 @@ fn prompt_text(interrupt: &Interrupt) -> &'static str {
     }
 }
 
-fn auto_reason_label(reason: core::AutoReason) -> &'static str {
+fn auto_reason_text(reason: core::AutoReason) -> &'static str {
     match reason {
-        core::AutoReason::Frontier => "frontier",
-        core::AutoReason::Loot => "loot",
-        core::AutoReason::ThreatAvoidance => "threat-avoidance",
-        core::AutoReason::Stuck => "stuck",
-        core::AutoReason::Door => "door",
+        core::AutoReason::Frontier => "Exploring the unknown...",
+        core::AutoReason::Loot => "Moving to collect loot...",
+        core::AutoReason::ThreatAvoidance => "Pathing around threats...",
+        core::AutoReason::Stuck => "Auto-explore is stuck.",
+        core::AutoReason::Door => "Moving to open a door...",
     }
 }

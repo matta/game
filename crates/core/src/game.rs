@@ -165,7 +165,7 @@ impl Game {
         }
         if needs_replan {
             let next_intent = choose_frontier_intent(&self.state.map, player_pos);
-            let changed = !auto_reason_and_target_equal(self.state.auto_intent, next_intent);
+            let changed = self.state.auto_intent.map(|i| i.reason) != next_intent.map(|i| i.reason);
             if changed && let Some(intent) = next_intent {
                 self.log.push(LogEvent::AutoReasonChanged {
                     reason: intent.reason,
@@ -312,16 +312,6 @@ impl Game {
     }
 }
 
-fn auto_reason_and_target_equal(
-    left: Option<AutoExploreIntent>,
-    right: Option<AutoExploreIntent>,
-) -> bool {
-    match (left, right) {
-        (Some(l), Some(r)) => l.reason == r.reason && l.target == r.target,
-        (None, None) => true,
-        _ => false,
-    }
-}
 
 fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
     let mut best_safe: Option<(Pos, usize)> = None;
