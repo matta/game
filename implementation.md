@@ -19,7 +19,7 @@ A deterministic, ASCII-grid roguelike with:
 - ~10 perks
 - 2 passive gods
 - Procedural dungeon floors + small authored vault templates
-- Branching dungeon structure
+- Branching dungeon structure (strict one-way descent)
 - Ironman primary mode
 - Optional checkpoint-based easy mode (time travel via full replay from tick 0)
 - Journal-based save/load (same-build compatibility only)
@@ -60,16 +60,16 @@ Requirements to guarantee identical runs across macOS and Linux:
 - All randomness injected explicitly.
 - Deterministic containers/iteration: avoid `HashMap`/`HashSet` in simulation-critical paths unless keys are copied into a sorted buffer before iteration. Prefer `Vec` + explicit sort, or `BTreeMap`/`BTreeSet`.
 - `slotmap` iteration order is treated as non-contractual; deterministic systems/hashing must not depend on raw arena iteration order.
-- Actor and item records carry monotonic `spawn_seq` values assigned at creation; this is the primary stable ordering key.
-- For whole-world passes (turn queue rebuild, threat scans, hashing), iterate actors/items in `spawn_seq` ascending order.
+- To avoid fragility, do not use monotonic `spawn_seq` counters for canonical state or hashing; minor cosmetic changes might drift the count and break replays.
+- For whole-world passes (turn queue rebuild, threat scans, hashing), iterate actors/items sorted by stable visible identifiers (e.g., `(Pos.y, Pos.x, EntityKind)`).
 - Deterministic tie-breakers:
-  - Turn order: `(next_action_tick, speed_desc, spawn_seq)`; do not rely on generational key ordering for ties.
+  - Turn order: `(next_action_tick, speed_desc, pos.y, pos.x, entity_kind)`; do not rely on generational key ordering for ties.
   - Path tie resolution: fixed neighbor expansion order `Up, Right, Down, Left`.
 - Stable snapshot hash: `xxh3_64` over canonical binary encoding of minimal deterministic state only:
   - `seed`, `tick`
   - map tiles + deterministic tile metadata
-  - actor arena contents in `spawn_seq` ascending order
-  - item arena contents in `spawn_seq` ascending order
+  - actor arena contents sorted by stable `(Pos, Kind)` keys
+  - item arena contents sorted by stable `(Pos, Kind)` keys
   - RNG internal state
   - `next_input_seq`
   - policy state
@@ -99,22 +99,14 @@ pub enum AdvanceStopReason {
   BudgetExhausted,
 }
 
-pub struct TickFrame {
-  pub tick: u64,
-  pub player_pos: Pos,
-  pub visible_actor_positions: Vec<(EntityId, Pos)>,
-  pub auto_intent: Option<AutoExploreIntent>,
-}
-
 pub struct AdvanceResult {
   pub simulated_ticks: u32,
-  pub trace: Vec<TickFrame>, // deterministic order, ascending tick
   pub stop_reason: AdvanceStopReason,
 }
 
 impl Game {
   pub fn new(seed: u64, content: &ContentPack, mode: GameMode) -> Self;
-  pub fn advance(&mut self, max_steps: u32, max_trace_frames: usize) -> AdvanceResult;
+  pub fn advance(&mut self, max_steps: u32) -> AdvanceResult;
   pub fn request_pause(&mut self);
   pub fn apply_choice(
     &mut self,
@@ -123,31 +115,27 @@ impl Game {
   ) -> Result<(), GameError>;
   pub fn apply_policy_update(&mut self, update: PolicyUpdate) -> Result<(), GameError>;
   pub fn current_tick(&self) -> u64;
-  pub fn observation(&self) -> ObservationRef<'_>;
-  pub fn observation_owned(&self) -> ObservationOwned; // tools/debug export path
+  pub fn state(&self) -> &GameState;
   pub fn snapshot_hash(&self) -> u64;
 }
 ```
 
 Execution rule:
 - MVP threading model is single-threaded: Macroquad app loop and `Game` simulation run on the same main thread.
-- `app` auto mode advances with batch stepping: `advance(max_steps, max_trace_frames)`.
+- `app` auto mode advances with synchronous batch stepping: `advance(max_steps)`.
 - `core` still advances one tick at a time internally and may return early on interrupt, finish, pending pause, or batch budget exhaustion.
-- `app` runs simulation and presentation on two clocks:
-  - Simulation clock: fill a trace queue using `advance(...)` up to a CPU time budget.
-  - Presentation clock: consume queued `TickFrame`s at a configurable visual speed (ticks/second).
-- Simulation can run far ahead of rendering, but auto-stepping stops filling when the trace queue reaches a configured high-water mark.
+- Once the batch is complete, the `app` immediately renders the final state.
+- Because the trace queue has been dropped for the MVP, the player will see discrete leaps in state during auto-explore.
 - User pause requests are latched via `request_pause()` (called by the app after input polling on the same thread) and honored at the next tick boundary (`PausedAtBoundary`).
 
-Why this complexity is intentional:
-- A Rust `core` can simulate hundreds/thousands of ticks in one render frame; a naive loop would visually skip meaningful movement.
-- Players need controllable perceived speed (watchable motion, readable interrupts) without sacrificing fast simulation throughput.
-- The trace queue decouples simulation speed from presentation speed while preserving deterministic tick order.
-- `TickFrame` data is derived output, not an input source, so replay determinism still depends only on seed + input journal.
+## 3.1 Input Journal Specification (Replay-Only MVP)
 
-## 3.1 Input Journal Specification
+To minimize complexity and enforce determinism, the MVP uses **exactly one** state restoration mechanism: a versioned, append-only input journal. There is no `GameState` snapshot serialization.
 
-Replays are represented as a versioned append-only **input journal** (all core inputs in order), enabling deterministic replay without Macroquad.
+- **Saving (ironman):** Write `{seed, inputs_so_far}` to disk.
+- **Loading:** Instantiate from `seed`, replay all inputs to reconstruct state.
+- **Easy Mode:** Load the same file, truncate inputs to a checkpoint marker, and replay from tick 0.
+- **Debugging:** Export the same file to reproduce bugs perfectly.
 
 ```rust
 pub struct InputJournal {
@@ -155,13 +143,12 @@ pub struct InputJournal {
   pub build_id: String,      // git SHA or build fingerprint
   pub content_hash: u64,     // content pack fingerprint
   pub seed: u64,
-  pub events: Vec<InputEvent>,
+  pub inputs: Vec<InputRecord>,
   pub checkpoints: Vec<CheckpointMarker>, // easy-mode restore candidates
 }
 
-pub struct InputEvent {
+pub struct InputRecord {
   pub seq: u64,
-  pub tick_boundary: u64, // boundary where event is accepted
   pub payload: InputPayload,
 }
 
@@ -172,8 +159,7 @@ pub enum InputPayload {
 
 pub struct CheckpointMarker {
   pub id: u32,
-  pub tick_boundary: u64,
-  pub input_seq: u64,      // restore by replaying events up to this sequence
+  pub input_seq: u64,      // restore by truncating inputs beyond this sequence
   pub reason: CheckpointReason,
 }
 
@@ -187,84 +173,35 @@ pub enum CheckpointReason {
 }
 ```
 
-`ChoicePromptId` is emitted by `core` with each `Interrupt`, and must match on `apply_choice(...)`.  
-MVP compatibility guarantee: journal replay is supported only when `build_id` and `content_hash` match.
+MVP Disk I/O Semantics:
+- The journal is held in memory and written to disk only when an `InputRecord` is appended (i.e., upon resolving an interrupt or updating a policy).
+- Writing uses a simple write-to-temp-file and atomic-rename to prevent corruption. No continuous per-tick disk syncing.
+- `ChoicePromptId` is emitted by `core` with each `Interrupt`, and must match on `apply_choice(...)`.
+- MVP compatibility guarantee: journal replay is supported only when `build_id` and `content_hash` match.
 
 ## 3.2 Core / App Communication Contract
 
 - `app` provides **pure inputs**: `InputPayload`.
-- `core` returns **pure outputs**: `AdvanceResult` (`TickFrame` + `AdvanceStopReason`), `ObservationRef`, `LogEvent`.
-- `app` never reads or writes `core` internals except through the public API.
+- `core` returns **pure outputs**: `AdvanceResult`, `LogEvent`, and provides immutable view access via `state()`.
+- `app` never writes `core` internals except through the public API mutations (`apply_choice`, etc.).
 
 The `app` crate controls the execution loop, deciding whether to auto-explore or wait for user input (e.g., when paused). The `core` only receives inputs that mutate simulation state, remaining entirely ignorant of UI concepts.
+The boundary between simulation logic and presentation is enforced by **Cargo dependencies**. The `core` crate does not depend on `macroquad` or any UI crates, ensuring simulation data structures (`Actor`, `Tile`, etc.) remain pure. The `app` crate reads `&GameState` directly and is fully responsible for matching logical state to rendering output (glyphs, colors, positions).
 
-`ObservationRef` is strictly engine-agnostic state and is returned as a borrow (no per-frame deep copy):
+`AutoExploreIntent` is a required explainability artifact for pathing/frontier decisions, available on `&GameState`.
+To prevent log spam while maintaining explainability, `core` emits `LogEvent::AutoSegmentStarted` only when the auto-explore planner selects a *new* target or fundamentally changes its reason for moving. It does not emit per-tick distance countdowns.
+The `app` UI keeps this trace hidden by default during normal play, but it can be toggled via an "Inspect" overlay (e.g. `L` key) to help players understand *why* their current policy resulted in the game's routing decisions.
 
 ```rust
-pub struct ObservationRef<'a> {
-  pub visible_tiles: &'a [TileObservation],    // TileKind only; no glyph/color
-  pub visible_actors: &'a [ActorObservation],  // logical entities in view
-  pub player: PlayerObservation,               // logical stats and statuses
-  pub current_auto_intent: Option<AutoExploreIntent>, // why auto-explore is moving
-}
-
-pub struct TileObservation {
-  pub pos: Pos,
-  pub tile: TileKind,
-}
-
-pub struct ActorObservation {
-  pub id: EntityId,
-  pub kind: ActorKind,
-  pub pos: Pos,
-  pub status_bits: StatusBits,
-}
-
-pub struct PlayerObservation {
-  pub hp: i32,
-  pub max_hp: i32,
-  pub status_bits: StatusBits,
-}
-
-pub struct AutoExploreIntent {
-  pub target: Pos,
-  pub reason: AutoReason,
-  pub path_len: u16,
-}
-
-pub enum AutoReason {
-  Frontier,
-  Loot,
-  BranchGoal,
-  ThreatAvoidance,
-  ReturnToSafe,
-}
-
-pub struct ObservationOwned {
-  pub visible_tiles: Vec<TileObservation>,
-  pub visible_actors: Vec<ActorObservation>,
-  pub player: PlayerObservation,
-  pub current_auto_intent: Option<AutoExploreIntent>,
-}
-
 pub enum LogEvent {
   // ... other gameplay events
-  AutoReasonChanged {
+  AutoSegmentStarted {
     reason: AutoReason,
     target: Pos,
-    path_len: u16,
+    planned_len: u16,
   },
 }
 ```
-
-Explicitly excluded from `ObservationRef`/`ObservationOwned`: glyphs, colors, fonts, panel layout, animation/motion cues, and any UI-specific formatting.
-Default render path should use `observation()` (`ObservationRef`) to avoid per-frame heap churn; `observation_owned()` is for tooling/debug paths where ownership is useful.
-
-`TickFrame` is also engine-agnostic (logical positions/targets only), and is used to pace presentation. Rendering style remains entirely in `app`.
-`AutoExploreIntent` is a required explainability artifact for pathing/frontier decisions.
-`core` emits `LogEvent::AutoReasonChanged` whenever the auto-explore target or reason changes.
-`path_len` is the planned shortest-path length from current player position to `target` at decision time.
-Emission rule: emit on `(target, reason)` transition; do not spam events for per-tick `path_len` shrink while following the same intent.
 
 Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
 Action-cost requirement: automatic loadout swaps are in-world actions that consume ticks; no free pre-combat equipment changes.
@@ -296,7 +233,7 @@ pub fn replay_to_end(
 ## 3.3 Pause/Policy Timing Model
 
 - Auto-explore runs by repeated batch stepping, while simulation logic remains tick-granular internally.
-- Each `advance(...)` call emits an ordered `TickFrame` trace that the app can play back at any visual speed.
+- Each `advance(...)` call simulates up to N ticks synchronously before returning to the app for immediate rendering.
 - `core` checks pending pause between internal ticks and exits on the next boundary.
 - Pause changes control flow only and does not mutate simulation state.
 - When a hostile is first seen in FOV during auto-explore, `core` emits `EnemyEncounter` before committing opening combat actions.
@@ -304,15 +241,15 @@ pub fn replay_to_end(
 - While paused, the user may issue one or more policy updates.
 - On resume, the next tick uses the latest accepted policy state.
 - Replay applies policy updates at the recorded boundary before simulating the next tick.
-- Interrupts/finish are surfaced as stop reasons; app shows related UI once visual playback has consumed all prior trace frames.
+- Interrupts/finish are surfaced as stop reasons; app shows related UI immediately.
 
 ## 3.4 Easy Mode Checkpoint Model
 
 - Easy mode uses engine-authored checkpoint markers at deterministic boundaries (e.g., resolved god choice, level change, branch commitment, resolved camp).
 - Build-identity checkpoints are also supported (`PerkChosen`, `BuildDefiningLootResolved`).
 - On death, player may select any unlocked checkpoint.
-- Restore always replays from tick `0` to the checkpoint marker's `input_seq`; no state snapshot fast-path in MVP.
-- Checkpoint markers are persisted in the run save and must be consistent with deterministic replay.
+- **Restore mechanic:** Load the `InputJournal`, truncate the `inputs` list to the checkpoint marker's `input_seq`, and replay deterministically from tick 0.
+- Because replay involves only discrete `InputRecord` evaluation, simulation-from-zero performs fast enough for an MVP without the complexity of building a separate `GameState` snapshot/serde system.
 - To avoid checkpoint spam, build-defining loot checkpoints should be gated by explicit content flags/rarity tiers rather than firing for every pickup/equip.
 
 ---
@@ -323,11 +260,11 @@ pub fn replay_to_end(
 
 - `EntityId` (managed via `slotmap`)
 - `ItemId` (managed via `slotmap`; stable in interrupt/replay flows)
-- `Actor` (player or monster; includes monotonic `spawn_seq: u64`)
+- `Actor` (player or monster)
 - `Stats` (hp, atk, def, speed, limited resists)
 - `Status` (poison, bleed, slow — minimal set)
 - `Equipment` (small fixed slot set)
-- `ItemInstance` (includes monotonic `spawn_seq: u64`)
+- `ItemInstance`
 - `Perk`
 - `God` (passive modifiers only)
 - `Policy`
@@ -365,8 +302,8 @@ All spatial algorithms live strictly within `core`, with no dependency on extern
 ## 4.4 Deterministic Traversal Rules
 
 - Never rely on raw `slotmap` iteration order for simulation decisions, logging semantics, or hashing.
-- Before deterministic global passes, obtain active IDs and evaluate records in `spawn_seq` ascending order.
-- If `spawn_seq` ever collides due to bug/corruption, fail fast in debug builds (do not silently fallback to generational key order).
+- Before deterministic global passes, obtain active IDs and evaluate records ordered by stable sorting keys (e.g. `(Pos.y, Pos.x, Kind)`).
+- Do not silently fallback to generational key order for tie-breaking; if stable sorting keys collide, use a deterministic secondary attribute.
 
 ## 4.5 Loadout Action Semantics (MVP)
 
@@ -407,16 +344,7 @@ pub struct EnemyEncounterInterrupt {
 }
 
 pub struct ThreatSummary {
-  pub horizon_ticks: u8,           // fixed small N (e.g., 3)
-  pub expected_damage_band: (u16, u16), // rough lower/upper estimate over N ticks
   pub danger_tags: Vec<DangerTag>, // e.g., Poison, Burst, Ranged
-  pub escape_feasibility: EscapeFeasibility,
-}
-
-pub enum EscapeFeasibility {
-  Likely,
-  Uncertain,
-  Unlikely,
 }
 
 pub struct OpeningActionPreview {
@@ -431,7 +359,7 @@ pub enum OpeningAction {
 ```
 
 MVP guidance:
-- This summary can be heuristic and conservative; it does not need perfect tactical forecasting.
+- The threat summary relies on static facts (e.g. tags, basic stats). No speculative damage forecasting or heuristics in MVP.
 - Compute deterministically from current known state/policy so equal seeds and inputs produce equal summaries.
 - `EnemyEncounter` is emitted on first hostile sighting during auto-explore, before any opening swap/attack is executed.
 
@@ -469,13 +397,14 @@ Layout:
 - Right: player stats + policy
 - Bottom: event log
 - Modal: interrupt panels
+- Overlay: Inspect Trace panel (hidden by default)
 
 Input:
 - Space: toggle auto
 - Esc: menu
 - Number keys: interrupt choices
 - Tab: cycle policy presets
-- `[` / `]`: decrease/increase auto-explore visual speed (ticks/sec)
+- L: toggle Auto Trace inspect panel
 
 ## 7.1 Main Loop Sketch (Single Thread)
 
@@ -484,21 +413,11 @@ Input:
 async fn main() {
   let mut game = Game::new(seed, &content, mode);
   let mut auto_enabled = true;
-  let mut visual_ticks_per_sec = 30.0_f32;
-  let mut visual_tick_accum = 0.0_f32;
-  // Buffer of deterministic per-tick facts for smooth playback when simulation outruns rendering.
-  let mut trace_queue: VecDeque<TickFrame> = VecDeque::new();
-  // Stop reasons are delayed until buffered frames are shown, so UI doesn't jump ahead of animation.
-  let mut pending_stop: Option<AdvanceStopReason> = None;
-  let mut presented = PresentedState::from_observation(game.observation());
+  let mut presented = PresentedState::from_state(game.state());
 
   loop {
-    let dt = get_frame_time();
-
     // 1) Poll user input (Macroquad keyboard/mouse APIs)
     if is_key_pressed(KeyCode::Space) { auto_enabled = !auto_enabled; }
-    if is_key_pressed(KeyCode::LeftBracket)  { visual_ticks_per_sec *= 0.8; }
-    if is_key_pressed(KeyCode::RightBracket) { visual_ticks_per_sec *= 1.25; }
     if is_key_pressed(KeyCode::P) { game.request_pause(); }
 
     if let Some(update) = poll_policy_update_from_ui() {
@@ -514,54 +433,30 @@ async fn main() {
       }
     }
 
-    // 2) Fill simulation trace queue (simulation clock)
-    if auto_enabled && pending_stop.is_none() && trace_queue.len() < TRACE_HIGH_WATER {
-      let frame_start = get_time();
-      while get_time() - frame_start < SIM_BUDGET_SECS && trace_queue.len() < TRACE_HIGH_WATER {
-        let batch = game.advance(MAX_STEPS_PER_CALL, TRACE_CHUNK_MAX);
-        trace_queue.extend(batch.trace);
-        match batch.stop_reason {
-          AdvanceStopReason::BudgetExhausted => {}
-          stop => {
-            pending_stop = Some(stop);
-            break;
-          }
+    // 2) Batch simulation
+    if auto_enabled {
+      let batch = game.advance(MAX_STEPS_PER_CALL);
+      
+      match batch.stop_reason {
+        AdvanceStopReason::Interrupted(interrupt) => {
+          show_interrupt_ui(interrupt);
+          auto_enabled = false;
         }
-      }
-    }
-
-    // 3) Consume trace queue at configurable visual speed (presentation clock)
-    visual_tick_accum += dt * visual_ticks_per_sec;
-    while visual_tick_accum >= 1.0 && !trace_queue.is_empty() {
-      let tick_frame = trace_queue.pop_front().unwrap();
-      presented.apply_tick_frame(&tick_frame);
-      visual_tick_accum -= 1.0;
-    }
-
-    // 4) Only show interrupt/game-over after matching visual playback catches up
-    if trace_queue.is_empty() {
-      if let Some(stop) = pending_stop.take() {
-        match stop {
-          AdvanceStopReason::Interrupted(interrupt) => {
-            show_interrupt_ui(interrupt);
-            auto_enabled = false;
-          }
-          AdvanceStopReason::PausedAtBoundary { .. } => {
-            auto_enabled = false;
-          }
-          AdvanceStopReason::Finished(outcome) => {
-            show_game_over_ui(outcome);
-            auto_enabled = false;
-          }
-          AdvanceStopReason::BudgetExhausted => {}
+        AdvanceStopReason::PausedAtBoundary { .. } => {
+          auto_enabled = false;
         }
-      } else {
-        // Keep presented state aligned when no buffered trace remains.
-        presented.sync_from_observation(game.observation());
+        AdvanceStopReason::Finished(outcome) => {
+          show_game_over_ui(outcome);
+          auto_enabled = false;
+        }
+        AdvanceStopReason::BudgetExhausted => {}
       }
+      
+      // Keep presented state aligned.
+      presented.sync_from_state(game.state());
     }
 
-    // 5) Render
+    // 3) Render
     render_presented_state(&presented);
     next_frame().await;
   }
@@ -582,11 +477,11 @@ async fn main() {
 ## Milestone 1 — CoreSim Skeleton & Initial UI (10–12 hrs)
 - Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
 - Implement `RunState` and basic map structure (dense tile arrays).
-- Implement `advance(...)` API (`AdvanceResult`, `TickFrame`, stop reasons) and prompt-bound `apply_choice`.
+- Implement `advance(...)` API (`AdvanceResult`, stop reasons) and prompt-bound `apply_choice`.
 - Implement headless replay API in `core` (`replay_to_end(content, journal) -> ReplayResult`).
 - Add thin `tools/replay_runner` CLI wrapper that prints final `snapshot_hash`/outcome from a journal file.
 - Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
-- Implement two-clock auto loop (simulation fill + playback consume) with pause-at-next-tick-boundary behavior.
+- Implement single-clock auto loop (synchronous batch stepping) with pause-at-next-tick-boundary behavior.
 - Implement Player + 1 enemy, turn engine, and fake loot interrupt.
 *Done when: repeated runs with the same seed/journal produce identical final snapshot hash via headless replay API.*
 
@@ -596,7 +491,6 @@ async fn main() {
 - Implement `AutoExploreIntent { target, reason, path_len }` as required core output.
 - Emit `LogEvent::AutoReasonChanged { reason, target, path_len }` whenever target/reason changes.
 - Render ASCII map and display event log in `app`.
-- Implement trace-driven playback controls (visual ticks/sec) independent of simulation throughput.
 - Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
 *Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and intent/reason changes are inspectable in the event log.*
 
@@ -622,10 +516,9 @@ Scope guard: advanced door/hazard simulation and richer danger scoring defer to 
 Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) defers to post-MVP.
 
 ## Milestone 4 — Floors + Branching (12–15 hrs)
-- Multiple floors.
-- Descend/ascend mechanics.
-- Overworld selector.
-- Branch modifies spawn tables.
+- Multiple floors (strict one-way descent).
+- Branching paths (modifies spawn tables/environment).
+- No overworld selector or ascending mechanics.
 *Done when: route choice matters.*
 
 ## Milestone 5 — Content Pass (15–18 hrs)
@@ -635,19 +528,18 @@ Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) d
 *Done when: 3+ viable archetypes exist.*
 
 ## Milestone 6 — Fairness Tooling (8–10 hrs)
-- Expand/retune threat summaries beyond MVP heuristics.
+- Refine threat tags and static encounter facts.
 - Seed display + copy.
 - Determinism hash.
 - Death-recap UI using reason codes from Milestone 3.
 *Done when: deaths are reproducible and explainable to the player.*
 
 ## Milestone 7 — Persistence, Replay, and Easy Mode Checkpoints (8–10 hrs)
-- Implement append-only `InputJournal` logging.
-- Load games by fast-forwarding journal events.
-- Add deterministic checkpoint marker generation at engine-authored boundaries (including perk/build-defining loot events).
-- Implement death flow to select checkpoint and restore via replay from tick 0 to marker `input_seq`.
-- Use atomic writes + checksums for crash-safe persistence.
-*Done when: save/load, replay, and checkpoint time travel are reliable within the same build/content fingerprint.*
+- Implement append-only `InputJournal` logging in memory, writing atomically on new inputs.
+- Load games by replaying journal events from tick 0.
+- Add deterministic checkpoint marker generation at engine-authored boundaries.
+- Implement death flow to select checkpoint and restore via truncating journal and replaying from tick 0.
+*Done when: save/load, replay, and checkpoint time travel use the exact same code path and are reliable.*
 
 ## Milestone 8 — Release Packaging (8–10 hrs)
 - Versioning and final balance pass.
@@ -709,3 +601,42 @@ Rationale:
 - Snapshot-accelerated checkpoint restore for faster reloads.
 - Best-effort migration layer for replay files across content/code versions.
 - Optional golden replay corpus once content format stabilizes.
+
+---
+
+# 13. Decision Records
+
+## DR-001: Synchronous Batch Simulation over Trace Animation
+**Context:** Initial plan proposed a two-clock system where simulation ran decoupled from presentation, buffering `TickFrame` traces to animate auto-explore steps.
+**Decision:** Dropped two-clock trace queue for MVP. We will execute synchronous simulation batches and immediately render the resulting state.
+**Rationale:** MVP focus is on buildcrafting, not micromovement spectacle. Animating deterministic tick-by-tick steps introduces heavy async/state-management costs into the UI that don't serve the core gameplay loop.
+
+## DR-002: Static Threat Display over Tactical Forecasting
+**Context:** Initial plan required heuristic simulation of future outcomes (`expected_damage_band`, `escape_feasibility`) during enemy encounters.
+**Decision:** Replaced dynamic forecasting with exposing static facts (danger tags, attack/defense stats).
+**Rationale:** Automated tactical forecasting is a huge implementation risk, prone to bugs and high maintenance as content changes. Mastery should rely on the player learning the system, not an in-game analyst.
+
+## DR-003: Strict One-Way Descent over Overworld Branches
+**Context:** Goal was to have multiple floors, an overworld selector, and ascending/descending mechanics.
+**Decision:** Cut the overworld and ascending features in favor of a strict one-way descent.
+**Rationale:** Supporting two-way staircases means carrying complex world states (multiple floors) in memory or disk. A strict descent eliminates this massive state management burden and reinforces the game's core loop of "forward momentum".
+
+## DR-004: Stable Identifiers over Monotonic Spawn Sequences
+**Context:** Proposed caching chronological `spawn_seq` properties for deterministic entity hashing and traversal tie-breakers.
+**Decision:** Removed `spawn_seq` counters from canonical state. Tie-breakers now prioritize stable, visible identifiers (e.g. `(Pos.y, Pos.x, EntityKind)`).
+**Rationale:** Relying on creation sequence for simulation logic makes replays extremely fragile; a cosmetic tweak that creates an invisible particle effect or drops an item out-of-order would permanently break the run seed determinism.
+
+## DR-005: Replay-Only State Restoration over Snapshots
+**Context:** Needed a state restoration system for save/load, easy-mode time travel, and debugging. Considered implementing serde snapshots to avoid the presumed performance cost of replaying from tick 0.
+**Decision:** Rejected snapshots. The MVP will use exactly one restoration mechanism: a lightweight Input Journal (`seed` + player choices/policies). Time travel is achieved by truncating the journal and re-simulating from tick 0.
+**Rationale:** Having exactly one restoration mechanism drastically reduces complexity. The performance cost of re-simulating an ASCII run without rendering is presumed fast enough for an MVP, making the optimization of snapshots premature. Crucially, a journal provides a perfect test harness for our strict determinism contract and trivial, shareable debug replays.
+
+## DR-006: Direct State Access over DTO Mapping
+**Context:** Needed to prevent presentation logic (glyphs, colors) from bleeding into the `core` simulation engine. Initial plan used `ObservationRef` DTOs to encapsulate `core` state before passing it to `app`.
+**Decision:** Removed the DTO layer. The `app` will directly read the internal `&GameState` data structures via an immutable reference.
+**Rationale:** In a single-threaded runtime where `app` and `core` are cleanly separated by Cargo crates, the strict dependency direction (`app` -> `core`) naturally prevents UI from polluting the core. A 1:1 DTO mapping requires massive boilerplate whenever a generic simulation attribute evaluates (e.g. adding a new StatusEffect type). Direct immutable access maintains architectural purity without slowing feature velocity.
+
+## DR-007: Segmented Trace over Continuous Auto-Explore Logging
+**Context:** Need a way to explain auto-explore decisions to the player so deaths don't feel "unfair", but without spamming the UI with continuous pathing updates.
+**Decision:** Auto-explore acts as a planner emitting chunky `AutoSegmentStarted` log events only when deciding on a new target or objective. The UI hides this trace by default but allows the player to inspect the recent planner history on demand via a dedicated panel.
+**Rationale:** Fully black-boxing auto-explore makes policy tuning feel random. But logging every step creates unreadable noise. A segmented trace (logging the "intent" of the next N steps) satisfies the need for "why did it do that?" debuggability while remaining lightweight to implement and out of the player's way during normal play.
