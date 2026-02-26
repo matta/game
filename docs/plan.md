@@ -569,16 +569,16 @@ Execution guardrails for all Milestone 3 passes:
 - [ ] Do not redesign policy architecture during implementation; use the contracts already defined in sections **4.2**, **4.5**, **4.6**, and **5**.
 
 ### Milestone 3a — Starter Dungeon Coverage Baseline (3–4 hrs)
-- [ ] Replace the current single-room default map in `Game::new` with a deterministic starter layout on a `20x15` map using exact coordinates:
-- [ ] Room A floor rectangle: `x=2..6`, `y=3..7` (player start room; player starts at `(x=4, y=5)`).
-- [ ] Room B floor rectangle: `x=9..13`, `y=3..7`.
-- [ ] Room C floor rectangle: `x=9..13`, `y=9..13`.
-- [ ] Corridor A<->B floor tiles: `(x=7, y=5)` and `(x=8, y=5)` with `ClosedDoor` at `(x=8, y=5)`.
-- [ ] Corridor B<->C floor tiles: `(x=11, y=8)` and `(x=11, y=9)`.
-- [ ] Hazard lane tiles (all hazardous): `(x=11, y=8)`, `(x=11, y=9)`, `(x=11, y=10)`.
-- [ ] Spawn at least two goblins for deterministic multi-enemy setup at fixed positions `(x=11, y=5)` and `(x=11, y=11)`.
-- [ ] Add a starter-layout unit test that asserts door placement, hazard placement, and actor spawn coordinates exactly.
-- [ ] Add an integration smoke test on fixed seed that confirms normal auto-run can hit both `DoorBlocked` interrupt and `AutoReason::ThreatAvoidance` within `<= 250` ticks.
+- [x] Replace the current single-room default map in `Game::new` with a deterministic starter layout on a `20x15` map using exact coordinates:
+- [x] Room A floor rectangle: `x=2..6`, `y=3..7` (player start room; player starts at `(x=4, y=5)`).
+- [x] Room B floor rectangle: `x=9..13`, `y=3..7`.
+- [x] Room C floor rectangle: `x=9..13`, `y=9..13`.
+- [x] Corridor A<->B floor tiles: `(x=7, y=5)` and `(x=8, y=5)` with `ClosedDoor` at `(x=8, y=5)`.
+- [x] Corridor B<->C floor tiles: `(x=11, y=8)` and `(x=11, y=9)`.
+- [x] Hazard lane tiles (all hazardous): `(x=11, y=8)`, `(x=11, y=9)`, `(x=11, y=10)`.
+- [x] Spawn at least two goblins for deterministic multi-enemy setup at fixed positions `(x=11, y=5)` and `(x=11, y=11)`.
+- [x] Add a starter-layout unit test that asserts door placement, hazard placement, and actor spawn coordinates exactly.
+- [x] Add an integration smoke test on fixed seed that confirms normal auto-run can hit both `DoorBlocked` interrupt and `AutoReason::ThreatAvoidance` within `<= 250` ticks.
 **Pass 3a Exit Criteria:**
 - **a) User Experience:** A fresh run no longer feels like a single test chamber; the player traverses multiple connected rooms and can naturally encounter a door stop and hazard-influenced exploration.
 - **b) Progress toward vision:** Promotes exploration from a synthetic demo to a representative dungeon slice and verifies Milestone 2b systems (door/hazard/FOV intenting) in normal play flow.

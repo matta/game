@@ -49,7 +49,7 @@ impl Game {
         let player = Actor {
             id: EntityId::default(),
             kind: ActorKind::Player,
-            pos: Pos { y: 5, x: 5 },
+            pos: Pos { y: 5, x: 4 },
             hp: 20,
             max_hp: 20,
             next_action_tick: 10,
@@ -58,24 +58,72 @@ impl Game {
         let player_id = actors.insert(player);
         actors[player_id].id = player_id;
 
-        let enemy = Actor {
+        let enemy_a = Actor {
             id: EntityId::default(),
             kind: ActorKind::Goblin,
-            pos: Pos { y: 5, x: 10 },
+            pos: Pos { y: 5, x: 11 },
             hp: 10,
             max_hp: 10,
             next_action_tick: 12,
             speed: 12,
         };
-        let enemy_id = actors.insert(enemy);
-        actors[enemy_id].id = enemy_id;
+        let enemy_a_id = actors.insert(enemy_a);
+        actors[enemy_a_id].id = enemy_a_id;
+
+        let enemy_b = Actor {
+            id: EntityId::default(),
+            kind: ActorKind::Goblin,
+            pos: Pos { y: 11, x: 11 },
+            hp: 10,
+            max_hp: 10,
+            next_action_tick: 12,
+            speed: 12,
+        };
+        let enemy_b_id = actors.insert(enemy_b);
+        actors[enemy_b_id].id = enemy_b_id;
 
         let mut map = Map::new(20, 15);
-        map.set_tile(Pos { y: 5, x: 8 }, TileKind::Wall);
-        map.set_tile(Pos { y: 6, x: 8 }, TileKind::Wall);
+
+        for y in 1..(map.internal_height - 1) {
+            for x in 1..(map.internal_width - 1) {
+                map.set_tile(Pos { y: y as i32, x: x as i32 }, TileKind::Wall);
+            }
+        }
+
+        // Room A floor rectangle: x=2..6, y=3..7.
+        for y in 3..=7 {
+            for x in 2..=6 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        // Room B floor rectangle: x=9..13, y=3..7.
+        for y in 3..=7 {
+            for x in 9..=13 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        // Room C floor rectangle: x=9..13, y=9..13.
+        for y in 9..=13 {
+            for x in 9..=13 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+
+        // Corridor A<->B with closed door at (8,5).
+        map.set_tile(Pos { y: 5, x: 7 }, TileKind::Floor);
+        map.set_tile(Pos { y: 5, x: 8 }, TileKind::ClosedDoor);
+
+        // Corridor B<->C floor tiles.
+        map.set_tile(Pos { y: 8, x: 11 }, TileKind::Floor);
+        map.set_tile(Pos { y: 9, x: 11 }, TileKind::Floor);
+
+        // Hazard lane tiles.
+        map.set_hazard(Pos { y: 8, x: 11 }, true);
+        map.set_hazard(Pos { y: 9, x: 11 }, true);
+        map.set_hazard(Pos { y: 10, x: 11 }, true);
 
         let mut items = slotmap::SlotMap::with_key();
-        let item = Item { id: ItemId::default(), pos: Pos { y: 5, x: 5 } };
+        let item = Item { id: ItemId::default(), pos: Pos { y: 5, x: 6 } };
         let item_id = items.insert(item);
         items[item_id].id = item_id;
 
@@ -311,7 +359,6 @@ impl Game {
             .find(|(_, a)| manhattan(pos, a.pos) == 1)
     }
 }
-
 
 fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
     let mut best_safe: Option<(Pos, usize)> = None;
@@ -635,6 +682,38 @@ mod tests {
         map.set_tile(door, TileKind::ClosedDoor);
         map.discovered[5 * 10 + 7] = false;
         (map, Pos { y: 5, x: 5 }, door)
+    }
+
+    #[test]
+    fn starter_layout_has_expected_rooms_door_hazards_and_spawns() {
+        let game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+
+        let expected_player = Pos { y: 5, x: 4 };
+        assert_eq!(game.state.actors[game.state.player_id].pos, expected_player);
+
+        let loot_positions: Vec<Pos> = game.state.items.iter().map(|(_, item)| item.pos).collect();
+        assert_eq!(loot_positions, vec![Pos { y: 5, x: 6 }]);
+        assert!(!loot_positions.contains(&expected_player));
+
+        let goblin_positions: Vec<Pos> = game
+            .state
+            .actors
+            .iter()
+            .filter(|(id, actor)| *id != game.state.player_id && actor.kind == ActorKind::Goblin)
+            .map(|(_, actor)| actor.pos)
+            .collect();
+        assert_eq!(goblin_positions.len(), 2, "starter layout should spawn two goblins");
+        assert!(goblin_positions.contains(&Pos { y: 5, x: 11 }));
+        assert!(goblin_positions.contains(&Pos { y: 11, x: 11 }));
+
+        assert_eq!(game.state.map.tile_at(Pos { y: 5, x: 8 }), TileKind::ClosedDoor);
+        assert_eq!(game.state.map.tile_at(Pos { y: 5, x: 7 }), TileKind::Floor);
+        assert_eq!(game.state.map.tile_at(Pos { y: 8, x: 11 }), TileKind::Floor);
+        assert_eq!(game.state.map.tile_at(Pos { y: 9, x: 11 }), TileKind::Floor);
+
+        for hazard in [Pos { y: 8, x: 11 }, Pos { y: 9, x: 11 }, Pos { y: 10, x: 11 }] {
+            assert!(game.state.map.is_hazard(hazard), "expected hazard at {hazard:?}");
+        }
     }
 
     #[test]
