@@ -154,3 +154,29 @@ pub struct GameState {
     pub player_id: EntityId,
     pub auto_intent: Option<AutoExploreIntent>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn visibility_helpers_handle_bounds_and_clear() {
+        let mut map = Map::new(5, 5);
+        let in_bounds = Pos { y: 2, x: 2 };
+        let out_of_bounds = Pos { y: -1, x: 2 };
+
+        assert!(!map.is_visible(in_bounds));
+        assert!(!map.is_visible(out_of_bounds));
+
+        map.set_visible(in_bounds, true);
+        assert!(map.is_visible(in_bounds));
+        assert!(map.is_discovered(in_bounds));
+
+        map.set_visible(out_of_bounds, true);
+        assert!(!map.is_visible(out_of_bounds));
+
+        map.clear_visible();
+        assert!(!map.is_visible(in_bounds));
+        assert!(map.is_discovered(in_bounds), "clear_visible should not erase discovery");
+    }
+}

@@ -125,7 +125,7 @@ impl Game {
 
             if let Some(intent) = self.state.auto_intent
                 && intent.path_len > 0
-                && let Some(path) = astar_path(&self.state.map, player_pos, intent.target)
+                && let Some(path) = path_for_intent(&self.state.map, player_pos, intent)
                 && let Some(next_step) = path.first().copied()
             {
                 if self.state.map.tile_at(next_step) == TileKind::ClosedDoor {
@@ -152,8 +152,8 @@ impl Game {
         if let Some(intent) = self.state.auto_intent {
             if player_pos == intent.target {
                 needs_replan = true;
-            } else if is_frontier_candidate(&self.state.map, intent.target)
-                && let Some(path) = astar_path(&self.state.map, player_pos, intent.target)
+            } else if is_intent_target_still_valid(&self.state.map, intent)
+                && let Some(path) = path_for_intent(&self.state.map, player_pos, intent)
             {
                 let new_len = path.len() as u16;
                 if new_len != intent.path_len {
@@ -324,45 +324,105 @@ fn auto_reason_and_target_equal(
 }
 
 fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
-    let mut best: Option<(Pos, usize)> = None;
+    let mut best_safe: Option<(Pos, usize)> = None;
+    let mut best_hazard: Option<(Pos, usize)> = None;
     for y in 0..map.internal_height {
         for x in 0..map.internal_width {
             let p = Pos { y: y as i32, x: x as i32 };
-            if p == start || !is_frontier_candidate(map, p) {
+            if p == start || !is_frontier_candidate_visible(map, p) {
                 continue;
             }
-            if let Some(path) = astar_path(map, start, p) {
+            if !map.is_hazard(p) {
+                if let Some(path) = astar_path(map, start, p) {
+                    let len = path.len();
+                    let is_better = match best_safe {
+                        None => true,
+                        Some((best_pos, best_len)) => {
+                            len < best_len
+                                || (len == best_len && (p.y, p.x) < (best_pos.y, best_pos.x))
+                        }
+                    };
+                    if is_better {
+                        best_safe = Some((p, len));
+                    }
+                } else if let Some(path) = astar_path_allow_hazards(map, start, p) {
+                    // Safe frontier target reachable only by traversing hazard tiles.
+                    let len = path.len();
+                    let is_better = match best_hazard {
+                        None => true,
+                        Some((best_pos, best_len)) => {
+                            len < best_len
+                                || (len == best_len && (p.y, p.x) < (best_pos.y, best_pos.x))
+                        }
+                    };
+                    if is_better {
+                        best_hazard = Some((p, len));
+                    }
+                }
+            } else if let Some(path) = astar_path_allow_hazards(map, start, p) {
                 let len = path.len();
-                let is_better = match best {
+                let is_better = match best_hazard {
                     None => true,
                     Some((best_pos, best_len)) => {
                         len < best_len || (len == best_len && (p.y, p.x) < (best_pos.y, best_pos.x))
                     }
                 };
                 if is_better {
-                    best = Some((p, len));
+                    best_hazard = Some((p, len));
                 }
             }
         }
     }
-    best.map(|(t, l)| {
+
+    if let Some((t, l)) = best_safe {
         let reason = if map.tile_at(t) == TileKind::ClosedDoor {
             AutoReason::Door
         } else {
             AutoReason::Frontier
         };
-        AutoExploreIntent { target: t, reason, path_len: l as u16 }
+        return Some(AutoExploreIntent { target: t, reason, path_len: l as u16 });
+    }
+
+    best_hazard.map(|(t, l)| AutoExploreIntent {
+        target: t,
+        reason: AutoReason::ThreatAvoidance,
+        path_len: l as u16,
     })
 }
 
-fn is_frontier_candidate(map: &Map, pos: Pos) -> bool {
+fn is_safe_frontier_candidate(map: &Map, pos: Pos) -> bool {
+    is_frontier_candidate_visible(map, pos) && !map.is_hazard(pos)
+}
+
+fn is_frontier_candidate_visible(map: &Map, pos: Pos) -> bool {
     map.is_visible(pos)
-        && !map.is_hazard(pos)
         && map.tile_at(pos) != TileKind::Wall
         && neighbors(pos).iter().any(|n| map.in_bounds(*n) && !map.is_discovered(*n))
 }
 
+fn is_intent_target_still_valid(map: &Map, intent: AutoExploreIntent) -> bool {
+    match intent.reason {
+        AutoReason::ThreatAvoidance => is_frontier_candidate_visible(map, intent.target),
+        _ => is_safe_frontier_candidate(map, intent.target),
+    }
+}
+
+fn path_for_intent(map: &Map, start: Pos, intent: AutoExploreIntent) -> Option<Vec<Pos>> {
+    match intent.reason {
+        AutoReason::ThreatAvoidance => astar_path_allow_hazards(map, start, intent.target),
+        _ => astar_path(map, start, intent.target),
+    }
+}
+
 fn astar_path(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
+    astar_path_internal(map, start, goal, true)
+}
+
+fn astar_path_allow_hazards(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
+    astar_path_internal(map, start, goal, false)
+}
+
+fn astar_path_internal(map: &Map, start: Pos, goal: Pos, avoid_hazards: bool) -> Option<Vec<Pos>> {
     if !map.is_discovered_walkable(start) || !map.is_discovered_walkable(goal) {
         return None;
     }
@@ -382,7 +442,7 @@ fn astar_path(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
         }
         let cur_g = *g_score.get(&p).unwrap();
         for n in neighbors(p) {
-            if !map.is_discovered_walkable_safe(n) {
+            if !is_astar_step_walkable(map, n, goal, avoid_hazards) {
                 continue;
             }
             let tg = cur_g + 1;
@@ -395,6 +455,20 @@ fn astar_path(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
         }
     }
     None
+}
+
+fn is_astar_step_walkable(map: &Map, pos: Pos, goal: Pos, avoid_hazards: bool) -> bool {
+    if !map.is_discovered_walkable(pos) {
+        return false;
+    }
+    if avoid_hazards && map.is_hazard(pos) {
+        return false;
+    }
+    // Closed doors can be reached as an immediate target, but not traversed through.
+    if map.tile_at(pos) == TileKind::ClosedDoor && pos != goal {
+        return false;
+    }
+    true
 }
 
 fn reconstruct_path(came: &BTreeMap<Pos, Pos>, start: Pos, goal: Pos) -> Vec<Pos> {
@@ -506,7 +580,7 @@ fn draw_map_diag(map: &Map, player: Pos) -> String {
                 '#'
             } else if map.tile_at(p) == TileKind::ClosedDoor {
                 '+'
-            } else if is_frontier_candidate(map, p) {
+            } else if is_safe_frontier_candidate(map, p) {
                 'F'
             } else {
                 '.'
@@ -524,18 +598,13 @@ fn draw_map_diag(map: &Map, player: Pos) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn fov_open_room_visibility() {
-        let mut map = Map::new(10, 10);
+    fn open_room_fixture() -> (Map, Pos) {
+        let map = Map::new(10, 10);
         let origin = Pos { y: 5, x: 5 };
-        compute_fov(&mut map, origin, 3);
-        assert!(map.is_visible(origin));
-        assert!(map.is_visible(Pos { y: 5, x: 8 }));
-        assert!(!map.is_visible(Pos { y: 1, x: 1 }));
+        (map, origin)
     }
 
-    #[test]
-    fn fov_wall_occlusion_blocks_tiles_behind_wall_in_corridor() {
+    fn wall_occlusion_fixture() -> (Map, Pos) {
         let mut map = Map::new(11, 11);
         for y in 1..10 {
             for x in 1..10 {
@@ -546,8 +615,99 @@ mod tests {
             map.set_tile(Pos { y: 5, x }, TileKind::Floor);
         }
         map.set_tile(Pos { y: 5, x: 6 }, TileKind::Wall);
+        (map, Pos { y: 5, x: 3 })
+    }
 
-        let origin = Pos { y: 5, x: 3 };
+    fn hazard_lane_fixture() -> (Map, Pos) {
+        let mut map = Map::new(9, 9);
+        for y in 1..8 {
+            for x in 1..8 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        for x in 2..=5 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        (map, Pos { y: 4, x: 2 })
+    }
+
+    fn closed_door_choke_fixture() -> (Map, Pos, Pos) {
+        let mut map = Map::new(10, 10);
+        for x in 0..10 {
+            for y in 0..10 {
+                map.set_tile(Pos { y, x }, if y == 5 { TileKind::Floor } else { TileKind::Wall });
+            }
+        }
+        map.discovered.fill(true);
+        let door = Pos { y: 5, x: 6 };
+        map.set_tile(door, TileKind::ClosedDoor);
+        map.discovered[5 * 10 + 7] = false;
+        (map, Pos { y: 5, x: 5 }, door)
+    }
+
+    #[test]
+    fn fov_open_room_visibility() {
+        let (mut map, origin) = open_room_fixture();
+        compute_fov(&mut map, origin, 3);
+        assert!(map.is_visible(origin));
+        assert!(map.is_visible(Pos { y: 5, x: 8 }));
+        assert!(!map.is_visible(Pos { y: 1, x: 1 }));
+    }
+
+    #[test]
+    fn fov_repeat_is_deterministic_for_same_state() {
+        let (mut map, origin) = open_room_fixture();
+        map.set_tile(Pos { y: 5, x: 7 }, TileKind::Wall);
+        map.set_tile(Pos { y: 6, x: 7 }, TileKind::Wall);
+
+        compute_fov(&mut map, origin, FOV_RADIUS);
+        let first = map.visible.clone();
+        compute_fov(&mut map, origin, FOV_RADIUS);
+        let second = map.visible.clone();
+
+        assert_eq!(first, second, "FOV result must be identical for same map/origin");
+    }
+
+    #[test]
+    fn movement_updates_visibility_and_expands_discovery() {
+        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let mut map = Map::new(30, 10);
+        for y in 1..9 {
+            for x in 1..29 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        for x in 1..26 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        map.discovered.fill(false);
+        game.state.map = map;
+
+        let start = Pos { y: 4, x: 5 };
+        game.state.actors[game.state.player_id].pos = start;
+        compute_fov(&mut game.state.map, start, FOV_RADIUS);
+        // Create visible frontier at (4,15) by leaving (4,16) unknown.
+        game.state.map.discovered[(4 * game.state.map.internal_width) + 16] = false;
+        let discovered_before = game.state.map.discovered.iter().filter(|&&d| d).count();
+
+        let result = game.advance(1);
+        assert!(matches!(result.stop_reason, AdvanceStopReason::BudgetExhausted));
+        assert_eq!(game.state.actors[game.state.player_id].pos, Pos { y: 4, x: 6 });
+        let discovered_after = game.state.map.discovered.iter().filter(|&&d| d).count();
+        assert!(
+            discovered_after > discovered_before,
+            "moving with FOV recompute should discover at least one new tile"
+        );
+    }
+
+    #[test]
+    fn fov_wall_occlusion_blocks_tiles_behind_wall_in_corridor() {
+        let (mut map, origin) = wall_occlusion_fixture();
         compute_fov(&mut map, origin, 10);
 
         assert!(map.is_visible(Pos { y: 5, x: 5 }));
@@ -560,17 +720,7 @@ mod tests {
 
     #[test]
     fn planner_avoids_hazard_route_when_safe_frontier_exists() {
-        let mut map = Map::new(9, 9);
-        for y in 1..8 {
-            for x in 1..8 {
-                map.set_tile(Pos { y, x }, TileKind::Wall);
-            }
-        }
-
-        // Hazard route (candidate is unreachable without stepping on hazard).
-        for x in 2..=5 {
-            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
-        }
+        let (mut map, start) = hazard_lane_fixture();
         map.set_hazard(Pos { y: 4, x: 3 }, true);
 
         // Safe alternative route to a different frontier.
@@ -588,9 +738,166 @@ mod tests {
         // Safe frontier candidate.
         map.discovered[(2 * map.internal_width) + 5] = false;
 
-        let start = Pos { y: 4, x: 2 };
         let intent = choose_frontier_intent(&map, start).expect("expected frontier intent");
         assert_eq!(intent.target, Pos { y: 2, x: 4 });
+    }
+
+    #[test]
+    fn planner_reports_threat_avoidance_when_only_hazard_frontier_exists() {
+        let (mut map, start) = hazard_lane_fixture();
+        map.set_hazard(Pos { y: 4, x: 5 }, true);
+        map.discovered[(4 * map.internal_width) + 6] = false;
+
+        let intent = choose_frontier_intent(&map, start).expect("hazard fallback intent");
+        assert_eq!(intent.reason, AutoReason::ThreatAvoidance);
+    }
+
+    #[test]
+    fn safe_frontier_reachable_only_through_hazards_uses_threat_avoidance() {
+        let mut map = Map::new(11, 9);
+        for y in 1..8 {
+            for x in 1..10 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        for x in 2..=8 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        map.set_hazard(Pos { y: 4, x: 4 }, true);
+        map.set_hazard(Pos { y: 4, x: 6 }, true);
+        map.discovered[(4 * map.internal_width) + 1] = false;
+        map.discovered[(4 * map.internal_width) + 9] = false;
+
+        let start = Pos { y: 4, x: 5 };
+        let intent = choose_frontier_intent(&map, start).expect("fallback on safe frontier");
+        assert_eq!(intent.reason, AutoReason::ThreatAvoidance);
+        assert_eq!(intent.target, Pos { y: 4, x: 2 });
+    }
+
+    #[test]
+    fn threat_avoidance_intent_is_reused_without_retarget_replan() {
+        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let mut map = Map::new(11, 9);
+        for y in 1..8 {
+            for x in 1..10 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        for x in 2..=8 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        map.set_hazard(Pos { y: 4, x: 4 }, true);
+        map.set_hazard(Pos { y: 4, x: 6 }, true);
+        map.discovered[(4 * map.internal_width) + 1] = false;
+        map.discovered[(4 * map.internal_width) + 9] = false;
+        game.state.map = map;
+
+        let p1 = Pos { y: 4, x: 5 };
+        game.state.actors[game.state.player_id].pos = p1;
+        game.plan_auto_intent(p1);
+        let first_intent = game.state.auto_intent.expect("first intent");
+        assert_eq!(first_intent.reason, AutoReason::ThreatAvoidance);
+        assert_eq!(first_intent.target, Pos { y: 4, x: 2 });
+        let first_log_count =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(first_log_count, 1);
+
+        // Move opposite the current target; replan would switch to x=8, reuse should not.
+        let p2 = Pos { y: 4, x: 6 };
+        game.state.actors[game.state.player_id].pos = p2;
+        game.plan_auto_intent(p2);
+        let second_intent = game.state.auto_intent.expect("second intent");
+        assert_eq!(second_intent.reason, AutoReason::ThreatAvoidance);
+        assert_eq!(second_intent.target, Pos { y: 4, x: 2 });
+        let second_log_count =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(second_log_count, 1);
+    }
+
+    #[test]
+    fn advance_uses_hazard_path_for_threat_avoidance_intent() {
+        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let mut map = Map::new(11, 9);
+        for y in 1..8 {
+            for x in 1..10 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        for x in 2..=8 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        map.set_hazard(Pos { y: 4, x: 4 }, true);
+        map.set_hazard(Pos { y: 4, x: 6 }, true);
+        map.discovered[(4 * map.internal_width) + 1] = false;
+        map.discovered[(4 * map.internal_width) + 9] = false;
+        game.state.map = map;
+
+        let start = Pos { y: 4, x: 5 };
+        game.state.actors[game.state.player_id].pos = start;
+
+        let result = game.advance(1);
+        assert!(matches!(result.stop_reason, AdvanceStopReason::BudgetExhausted));
+        assert_eq!(game.state.actors[game.state.player_id].pos, Pos { y: 4, x: 4 });
+        assert_eq!(game.state.auto_intent.map(|i| i.reason), Some(AutoReason::ThreatAvoidance));
+    }
+
+    #[test]
+    fn frontier_selection_ignores_non_visible_frontiers() {
+        let mut map = Map::new(10, 10);
+        for y in 1..9 {
+            for x in 1..9 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        map.discovered.fill(true);
+        map.visible.fill(false);
+        for x in 2..=5 {
+            map.set_visible(Pos { y: 4, x }, true);
+        }
+        map.discovered[(4 * map.internal_width) + 6] = false; // visible frontier
+        map.discovered[(6 * map.internal_width) + 8] = false; // not visible frontier
+
+        let start = Pos { y: 4, x: 3 };
+        let intent = choose_frontier_intent(&map, start).expect("visible frontier");
+        assert_eq!(intent.target, Pos { y: 4, x: 5 });
+    }
+
+    #[test]
+    fn closed_door_is_not_used_as_path_transit_tile() {
+        let mut map = Map::new(12, 6);
+        for y in 1..5 {
+            for x in 1..11 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        for x in 1..=10 {
+            map.set_tile(Pos { y: 3, x }, TileKind::Floor);
+        }
+        map.set_tile(Pos { y: 3, x: 5 }, TileKind::ClosedDoor);
+        map.discovered.fill(true);
+
+        let start = Pos { y: 3, x: 2 };
+        let beyond_door = Pos { y: 3, x: 8 };
+        assert!(
+            astar_path(&map, start, beyond_door).is_none(),
+            "closed door should block traversal to tiles behind it"
+        );
+        assert!(
+            astar_path(&map, start, Pos { y: 3, x: 5 }).is_some(),
+            "closed door may still be targeted directly for interrupt handling"
+        );
     }
 
     #[test]
@@ -598,18 +905,8 @@ mod tests {
         let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
-        let mut map = Map::new(10, 10);
-        for x in 0..10 {
-            for y in 0..10 {
-                map.set_tile(Pos { y, x }, if y == 5 { TileKind::Floor } else { TileKind::Wall });
-            }
-        }
-        map.discovered.fill(true);
-        let dp = Pos { y: 5, x: 6 };
-        map.set_tile(dp, TileKind::ClosedDoor);
-        map.discovered[5 * 10 + 7] = false; // Frontier at (5,6)
+        let (map, pp, dp) = closed_door_choke_fixture();
         game.state.map = map;
-        let pp = Pos { y: 5, x: 5 };
         game.state.actors[game.state.player_id].pos = pp;
         compute_fov(&mut game.state.map, pp, FOV_RADIUS);
 
@@ -632,6 +929,36 @@ mod tests {
                 draw_map_diag(&game.state.map, pp)
             );
         }
+    }
+
+    #[test]
+    fn door_interrupt_open_then_resume_moves_forward() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        let (map, start, door) = closed_door_choke_fixture();
+        game.state.map = map;
+        game.state.actors[game.state.player_id].pos = start;
+        compute_fov(&mut game.state.map, start, FOV_RADIUS);
+        game.state.auto_intent =
+            Some(AutoExploreIntent { target: door, reason: AutoReason::Door, path_len: 1 });
+
+        let first = game.advance(1);
+        let prompt_id = match first.stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::DoorBlocked { prompt_id, .. }) => prompt_id,
+            other => panic!("expected door interrupt, got {other:?}"),
+        };
+        game.apply_choice(prompt_id, Choice::OpenDoor).expect("open door");
+
+        let second = game.advance(1);
+        assert!(
+            !matches!(
+                second.stop_reason,
+                AdvanceStopReason::Interrupted(Interrupt::DoorBlocked { .. })
+            ),
+            "door should not immediately re-interrupt after opening"
+        );
+        assert_eq!(game.state.map.tile_at(door), TileKind::Floor);
     }
 
     #[test]
@@ -693,5 +1020,45 @@ mod tests {
         let cnt =
             game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
         assert_eq!(cnt, 1);
+    }
+
+    #[test]
+    fn auto_reason_changed_emits_only_on_reason_or_target_changes() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        let mut map = Map::new(10, 7);
+        for y in 1..6 {
+            for x in 1..9 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        for x in 1..=7 {
+            map.set_tile(Pos { y: 3, x }, TileKind::Floor);
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        map.discovered[(3 * map.internal_width) + 8] = false;
+        game.state.map = map;
+
+        let pos = Pos { y: 3, x: 2 };
+        game.state.actors[game.state.player_id].pos = pos;
+        game.plan_auto_intent(pos);
+        let count_after_first =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(count_after_first, 1);
+
+        // Same target, different reason due to hazard fallback.
+        game.state.map.set_hazard(Pos { y: 3, x: 7 }, true);
+        game.plan_auto_intent(pos);
+        let count_after_reason_change =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(count_after_reason_change, 2);
+
+        // No further reason/target change => no extra log.
+        game.plan_auto_intent(pos);
+        let count_after_repeat =
+            game.log().iter().filter(|e| matches!(e, LogEvent::AutoReasonChanged { .. })).count();
+        assert_eq!(count_after_repeat, 2);
     }
 }
