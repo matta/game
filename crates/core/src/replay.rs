@@ -1,5 +1,8 @@
 use crate::{
-    game::Game, journal::{InputJournal, InputPayload}, state::ContentPack, AdvanceStopReason, RunOutcome, GameMode,
+    AdvanceStopReason, GameMode, RunOutcome,
+    game::Game,
+    journal::{InputJournal, InputPayload},
+    state::ContentPack,
 };
 
 #[derive(Debug, PartialEq)]
@@ -24,7 +27,7 @@ pub fn replay_to_end(
 
     loop {
         let batch = game.advance(100);
-        
+
         match batch.stop_reason {
             AdvanceStopReason::Finished(outcome) => {
                 return Ok(ReplayResult {

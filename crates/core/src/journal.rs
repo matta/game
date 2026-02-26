@@ -17,10 +17,7 @@ pub struct InputRecord {
 
 #[derive(Clone, Debug)]
 pub enum InputPayload {
-    Choice {
-        prompt_id: ChoicePromptId,
-        choice: Choice,
-    },
+    Choice { prompt_id: ChoicePromptId, choice: Choice },
     // PolicyUpdate(...) would go here
 }
 
@@ -36,9 +33,6 @@ impl InputJournal {
     }
 
     pub fn append_choice(&mut self, prompt_id: ChoicePromptId, choice: Choice, seq: u64) {
-        self.inputs.push(InputRecord {
-            seq,
-            payload: InputPayload::Choice { prompt_id, choice },
-        });
+        self.inputs.push(InputRecord { seq, payload: InputPayload::Choice { prompt_id, choice } });
     }
 }

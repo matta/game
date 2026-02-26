@@ -1,5 +1,5 @@
-use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::ChaCha8Rng;
+use rand_chacha::rand_core::SeedableRng;
 
 use crate::state::{Actor, ContentPack, GameState, Map};
 use crate::types::*;
@@ -14,7 +14,7 @@ pub struct Game {
     next_input_seq: u64,
     pending_prompt: Option<ChoicePromptId>,
     pause_requested: bool,
-    
+
     // For M1 testing
     fake_loot_thrown: bool,
 }
@@ -22,9 +22,9 @@ pub struct Game {
 impl Game {
     pub fn new(seed: u64, _content: &ContentPack, _mode: GameMode) -> Self {
         let rng = ChaCha8Rng::seed_from_u64(seed);
-        
+
         let mut actors = slotmap::SlotMap::with_key();
-        
+
         let player = Actor {
             id: EntityId::default(), // Will be overwritten
             kind: ActorKind::Player,
@@ -36,7 +36,7 @@ impl Game {
         };
         let player_id = actors.insert(player);
         actors[player_id].id = player_id;
-        
+
         let enemy = Actor {
             id: EntityId::default(),
             kind: ActorKind::Goblin,
@@ -69,12 +69,12 @@ impl Game {
 
     pub fn advance(&mut self, max_steps: u32) -> AdvanceResult {
         let mut steps = 0;
-        
+
         if let Some(prompt_id) = self.pending_prompt {
-           return AdvanceResult {
-               simulated_ticks: 0,
-               stop_reason: AdvanceStopReason::Interrupted(Interrupt::LootFound(prompt_id)),
-           };
+            return AdvanceResult {
+                simulated_ticks: 0,
+                stop_reason: AdvanceStopReason::Interrupted(Interrupt::LootFound(prompt_id)),
+            };
         }
 
         while steps < max_steps {
@@ -99,7 +99,7 @@ impl Game {
                     stop_reason: AdvanceStopReason::Interrupted(Interrupt::LootFound(prompt_id)),
                 };
             }
-            
+
             // Advance the player arbitrarily to simulate auto explore
             if self.tick.is_multiple_of(10) {
                 let mut p = self.state.actors[self.state.player_id].pos;
@@ -108,7 +108,7 @@ impl Game {
                     self.state.actors[self.state.player_id].pos = p;
                 }
             }
-            
+
             if self.tick > 200 {
                 return AdvanceResult {
                     simulated_ticks: steps,
@@ -117,10 +117,7 @@ impl Game {
             }
         }
 
-        AdvanceResult {
-            simulated_ticks: steps,
-            stop_reason: AdvanceStopReason::BudgetExhausted,
-        }
+        AdvanceResult { simulated_ticks: steps, stop_reason: AdvanceStopReason::BudgetExhausted }
     }
 
     pub fn request_pause(&mut self) {
@@ -135,14 +132,14 @@ impl Game {
         if Some(prompt_id) != self.pending_prompt {
             return Err(GameError::PromptMismatch);
         }
-        
+
         self.pending_prompt = None;
         self.next_input_seq += 1;
-        
+
         if choice == Choice::KeepLoot {
             self.log.push(LogEvent::ItemPickedUp);
         }
-        
+
         Ok(())
     }
 
@@ -157,17 +154,17 @@ impl Game {
     pub fn snapshot_hash(&self) -> u64 {
         use std::hash::Hasher;
         use xxhash_rust::xxh3::Xxh3;
-        
+
         let mut hasher = Xxh3::new();
         hasher.write_u64(self.seed);
         hasher.write_u64(self.tick);
         hasher.write_u64(self.next_input_seq);
-        
+
         // Hash canonical basic state
         let player = &self.state.actors[self.state.player_id];
         hasher.write_i32(player.pos.x);
         hasher.write_i32(player.pos.y);
-        
+
         hasher.finish()
     }
 }

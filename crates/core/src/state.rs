@@ -35,11 +35,7 @@ impl Map {
             tiles[y * width] = TileKind::Wall;
             tiles[y * width + (width - 1)] = TileKind::Wall;
         }
-        Self {
-            internal_width: width,
-            internal_height: height,
-            tiles,
-        }
+        Self { internal_width: width, internal_height: height, tiles }
     }
 
     pub fn tile_at(&self, pos: Pos) -> TileKind {

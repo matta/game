@@ -1,6 +1,6 @@
 use core::journal::InputJournal;
-use core::state::ContentPack;
 use core::replay::replay_to_end;
+use core::state::ContentPack;
 
 #[test]
 fn test_determinism_identical_seeds_produce_same_hash() {
@@ -28,7 +28,7 @@ fn test_determinism_different_seeds_produce_different_hashes() {
     let content = ContentPack {};
     let mut journal1 = InputJournal::new(123);
     journal1.append_choice(core::ChoicePromptId(0), core::Choice::KeepLoot, 0);
-    
+
     let mut journal2 = InputJournal::new(456);
     journal2.append_choice(core::ChoicePromptId(0), core::Choice::KeepLoot, 0);
 

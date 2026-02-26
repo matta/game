@@ -65,14 +65,8 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LogEvent {
-    AutoSegmentStarted {
-        reason: AutoReason,
-        target: Pos,
-        planned_len: u16,
-    },
-    EnemyEncountered {
-        enemy: EntityId,
-    },
+    AutoSegmentStarted { reason: AutoReason, target: Pos, planned_len: u16 },
+    EnemyEncountered { enemy: EntityId },
     ItemPickedUp,
 }
 
