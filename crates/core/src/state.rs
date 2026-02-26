@@ -2,10 +2,6 @@ use slotmap::SlotMap;
 
 use crate::types::*;
 
-pub struct ContentPack {
-    // Hardcoded content schemas will go here.
-}
-
 #[derive(Clone, Debug)]
 pub struct Actor {
     pub id: EntityId,
@@ -13,6 +9,9 @@ pub struct Actor {
     pub pos: Pos,
     pub hp: i32,
     pub max_hp: i32,
+    pub attack: i32,
+    pub defense: i32,
+    pub active_weapon_slot: WeaponSlot,
     pub next_action_tick: u64,
     pub speed: u32,
 }

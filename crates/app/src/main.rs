@@ -3,7 +3,7 @@ use macroquad::prelude::*;
 
 #[macroquad::main("Roguelike")]
 async fn main() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
     let mut game = Game::new(12345, &content, GameMode::Ironman);
 
     let mut app_state = app::app_loop::AppState::default();

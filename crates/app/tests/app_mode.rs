@@ -4,7 +4,7 @@ use macroquad::prelude::KeyCode;
 
 #[test]
 fn test_manual_stepping_preserves_suspended_state() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
     let mut game = Game::new(12345, &content, GameMode::Ironman);
     let mut app = AppState::new();
 
@@ -22,7 +22,7 @@ fn test_manual_stepping_preserves_suspended_state() {
 
 #[test]
 fn test_autoplay_sets_suspended_state() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
     let mut game = Game::new(12345, &content, GameMode::Ironman);
     let mut app = AppState::new();
 
@@ -47,7 +47,7 @@ fn test_autoplay_sets_suspended_state() {
 
 #[test]
 fn test_auto_explore_interrupt_choice_and_resume_loop() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
     let mut game = Game::new(12345, &content, GameMode::Ironman);
     let mut app = AppState::new();
 

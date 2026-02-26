@@ -46,9 +46,20 @@ pub enum RunOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Interrupt {
-    LootFound { prompt_id: ChoicePromptId, item: ItemId },
-    EnemyEncounter { prompt_id: ChoicePromptId, enemies: Vec<EntityId>, primary_enemy: EntityId },
-    DoorBlocked { prompt_id: ChoicePromptId, pos: Pos },
+    LootFound {
+        prompt_id: ChoicePromptId,
+        item: ItemId,
+    },
+    EnemyEncounter {
+        prompt_id: ChoicePromptId,
+        enemies: Vec<EntityId>,
+        primary_enemy: EntityId,
+        retreat_eligible: bool,
+    },
+    DoorBlocked {
+        prompt_id: ChoicePromptId,
+        pos: Pos,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +124,12 @@ pub enum Stance {
     Aggressive,
     Balanced,
     Defensive,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WeaponSlot {
+    Primary,
+    Reserve,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

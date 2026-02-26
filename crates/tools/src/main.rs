@@ -19,7 +19,7 @@ fn main() -> Result<()> {
     let journal: InputJournal = serde_json::from_str(&journal_data)
         .with_context(|| "Failed to deserialize journal JSON")?;
 
-    let content = ContentPack {};
+    let content = ContentPack::default();
 
     let result: ReplayResult = replay_to_end(&content, &journal)
         .map_err(|e| anyhow::anyhow!("Replay failed during execution: {:?}", e))?;

@@ -621,20 +621,20 @@ Execution guardrails for all Milestone 3 passes:
 - **c) Architecture & Maintainability:** Boundary-gated policy updates plus journal/replay coverage preserve determinism and prevent state corruption from out-of-band policy edits.
 
 ### Milestone 3d — Policy Effects + SwapActiveWeapon + Micro Content (3–4 hrs)
-- [ ] Implement policy-driven target selection using `target_priority` when multiple enemies are in range; fallback tie-breaker remains `(distance, y, x, kind)`.
-- [ ] Implement stance modifiers with fixed deterministic combat deltas:
-- [ ] `Aggressive`: `+2 atk`, `-1 def`.
-- [ ] `Balanced`: `+0 atk`, `+0 def`.
-- [ ] `Defensive`: `-1 atk`, `+2 def`.
-- [ ] Implement retreat trigger check at encounter start: if `hp_percent <= retreat_hp_threshold`, mark encounter as retreat-eligible for policy/UI.
-- [ ] Implement `SwapActiveWeapon` as a simulation action with fixed tick cost `10`. Since there is no inventory grid, this toggles between a primary and reserve weapon. Available anytime the game is paused, but typically used during an enemy encounter.
-- [ ] Ensure `SwapActiveWeapon` execution is journaled and replayed deterministically like other player inputs.
-- [ ] Add micro validation content in `core::content`: exactly `2` weapons, `1` consumable, `2` perks with deterministic numeric effects (no proc chance).
-- [ ] Add tests verifying swap tick cost is applied and affects turn order deterministically.
-- [ ] Add tests verifying stance and target priority change deterministic combat outcomes in fixture encounters.
+- [x] Implement policy-driven target selection using `target_priority` when multiple enemies are in range; fallback tie-breaker remains `(distance, y, x, kind)`.
+- [x] Implement stance modifiers with fixed deterministic combat deltas:
+- [x] `Aggressive`: `+2 atk`, `-1 def`.
+- [x] `Balanced`: `+0 atk`, `+0 def`.
+- [x] `Defensive`: `-1 atk`, `+2 def`.
+- [x] Implement retreat trigger check at encounter start: if `hp_percent <= retreat_hp_threshold`, mark encounter as retreat-eligible for policy/UI.
+- [x] Implement `SwapActiveWeapon` as a simulation action with fixed tick cost `10`. Since there is no inventory grid, this toggles between a primary and reserve weapon. Available anytime the game is paused, but typically used during an enemy encounter.
+- [x] Ensure `SwapActiveWeapon` execution is journaled and replayed deterministically like other player inputs.
+- [x] Add micro validation content in `core::content`: exactly `2` weapons, `1` consumable, `2` perks with deterministic numeric effects (no proc chance).
+- [x] Add tests verifying swap tick cost is applied and affects turn order deterministically.
+- [x] Add tests verifying stance and target priority change deterministic combat outcomes in fixture encounters.
 **Pass 3d Exit Criteria:**
-- **a) User Experience:** Policy choices have immediate, visible combat impact (targeting, stance behavior, retreat eligibility), and pre-combat loadout swaps feel fair because they consume deterministic time.
-- **b) Progress toward vision:** Delivers the first end-to-end “policy over micromovement” combat loop, backed by minimal content that proves knob effects are meaningful in actual encounters.
+- **a) User Experience:** None directly. The combat simulator natively understands how to interpret policy commands and weapon swaps exist as discrete time-consuming actions, but the UI to control these does not yet exist.
+- **b) Progress toward vision:** Foundational. Provides the numerical and state-machine backing for the "policy over micromovement" combat loop, but the loop is not "end-to-end" until the UI is wired in Pass 3e.
 - **c) Architecture & Maintainability:** Combat deltas and swap timing are explicit numeric rules with deterministic tests, reducing ambiguity and making future balancing/refactors safer.
 
 ### Milestone 3e — UI Wiring + Fairness Instrumentation (2–3 hrs)
@@ -645,8 +645,8 @@ Execution guardrails for all Milestone 3 passes:
 - [ ] Add tests ensuring `ThreatSummary` tag ordering is deterministic and stable across repeated runs with identical inputs.
 - [ ] Add integration test validating policy edit -> resume -> resulting behavior and logs are replay-stable.
 **Pass 3e Exit Criteria:**
-- **a) User Experience:** The player can fully configure policy from pause UI, inspect threat context before committing, and receive actionable defeat explanations instead of opaque losses.
-- **b) Progress toward vision:** Completes the milestone’s fairness and transparency layer so policy decisions are explainable, debuggable, and consistent with the intended combat control surface.
+- **a) User Experience:** The player can fully configure policy from pause UI, inspect threat context before committing, and receive actionable defeat explanations instead of opaque losses. Policy choices have immediate, visible combat impact (targeting, stance behavior, retreat eligibility), and pre-combat loadout swaps feel fair because they consume deterministic time.
+- **b) Progress toward vision:** Completes the milestone’s fairness and transparency layer so policy decisions are explainable, debuggable, and consistent with the intended combat control surface. Delivers the first end-to-end “policy over micromovement” combat loop, backed by minimal content that proves knob effects are meaningful in actual encounters.
 - **c) Architecture & Maintainability:** Threat/death instrumentation uses deterministic ordering and bounded trace storage, enabling stable replay comparisons and low-noise debugging workflows.
 
 **Exit Criteria:**

@@ -7,5 +7,8 @@ pub mod types;
 pub use game::Game;
 pub use journal::{InputJournal, InputPayload, InputRecord};
 pub use replay::*;
-pub use state::{ContentPack, GameState, Map};
+pub mod content;
+
+pub use content::ContentPack;
+pub use state::{GameState, Map};
 pub use types::*;

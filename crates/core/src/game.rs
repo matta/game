@@ -3,13 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
 
-use crate::state::{Actor, ContentPack, GameState, Item, Map};
+use crate::content::ContentPack;
+use crate::state::{Actor, GameState, Item, Map};
 use crate::types::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PendingPromptKind {
     Loot { item: ItemId },
-    EnemyEncounter { enemies: Vec<EntityId>, primary_enemy: EntityId },
+    EnemyEncounter { enemies: Vec<EntityId>, primary_enemy: EntityId, retreat_eligible: bool },
     DoorBlocked { pos: Pos },
 }
 
@@ -53,6 +54,9 @@ impl Game {
             pos: Pos { y: 5, x: 4 },
             hp: 20,
             max_hp: 20,
+            attack: 5,
+            defense: 0,
+            active_weapon_slot: WeaponSlot::Primary,
             next_action_tick: 10,
             speed: 10,
         };
@@ -65,6 +69,9 @@ impl Game {
             pos: Pos { y: 5, x: 11 },
             hp: 10,
             max_hp: 10,
+            attack: 2,
+            defense: 0,
+            active_weapon_slot: WeaponSlot::Primary,
             next_action_tick: 12,
             speed: 12,
         };
@@ -77,6 +84,9 @@ impl Game {
             pos: Pos { y: 11, x: 11 },
             hp: 10,
             max_hp: 10,
+            attack: 2,
+            defense: 0,
+            active_weapon_slot: WeaponSlot::Primary,
             next_action_tick: 12,
             speed: 12,
         };
@@ -89,6 +99,9 @@ impl Game {
             pos: Pos { y: 6, x: 10 },
             hp: 10,
             max_hp: 10,
+            attack: 2,
+            defense: 0,
+            active_weapon_slot: WeaponSlot::Primary,
             next_action_tick: 12,
             speed: 12,
         };
@@ -101,6 +114,9 @@ impl Game {
             pos: Pos { y: 7, x: 9 },
             hp: 10,
             max_hp: 10,
+            attack: 2,
+            defense: 0,
+            active_weapon_slot: WeaponSlot::Primary,
             next_action_tick: 12,
             speed: 12,
         };
@@ -283,7 +299,33 @@ impl Game {
                 true
             }
             (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Fight) => {
-                self.state.actors.remove(primary_enemy);
+                let mut p_attack = self.state.actors[self.state.player_id].attack;
+                let mut _p_defense = self.state.actors[self.state.player_id].defense;
+
+                match self.state.policy.stance {
+                    Stance::Aggressive => {
+                        p_attack += 2;
+                        _p_defense -= 1;
+                    }
+                    Stance::Balanced => {}
+                    Stance::Defensive => {
+                        p_attack -= 1;
+                        _p_defense += 2;
+                    }
+                }
+
+                let e_defense = self.state.actors[primary_enemy].defense;
+                let damage = (p_attack - e_defense).max(1);
+
+                let e_actor = self.state.actors.get_mut(primary_enemy).unwrap();
+                e_actor.hp -= damage;
+
+                self.log.push(LogEvent::EncounterResolved { enemy: primary_enemy, fought: true });
+
+                if e_actor.hp <= 0 {
+                    self.state.actors.remove(primary_enemy);
+                }
+
                 true
             }
             (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Avoid) => {
@@ -325,6 +367,19 @@ impl Game {
             PolicyUpdate::ResourceAggression(a) => self.state.policy.resource_aggression = a,
             PolicyUpdate::ExplorationMode(e) => self.state.policy.exploration_mode = e,
         }
+        Ok(())
+    }
+
+    pub fn apply_swap_weapon(&mut self) -> Result<(), GameError> {
+        if !self.at_pause_boundary && self.pending_prompt.is_none() {
+            return Err(GameError::NotAtPauseBoundary);
+        }
+        let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+        player.active_weapon_slot = match player.active_weapon_slot {
+            WeaponSlot::Primary => WeaponSlot::Reserve,
+            WeaponSlot::Reserve => WeaponSlot::Primary,
+        };
+        player.next_action_tick += 10;
         Ok(())
     }
 
@@ -377,9 +432,13 @@ impl Game {
         primary_enemy: EntityId,
         steps: u32,
     ) -> AdvanceResult {
+        let player = &self.state.actors[self.state.player_id];
+        let hp_percent = (player.hp * 100) / player.max_hp;
+        let retreat_eligible = hp_percent <= (self.state.policy.retreat_hp_threshold as i32);
+
         let prompt = PendingPrompt {
             id: ChoicePromptId(self.next_input_seq),
-            kind: PendingPromptKind::EnemyEncounter { enemies, primary_enemy },
+            kind: PendingPromptKind::EnemyEncounter { enemies, primary_enemy, retreat_eligible },
         };
         self.pending_prompt = Some(prompt.clone());
         AdvanceResult {
@@ -401,8 +460,13 @@ impl Game {
     fn prompt_to_interrupt(&self, prompt: PendingPrompt) -> Interrupt {
         match prompt.kind {
             PendingPromptKind::Loot { item } => Interrupt::LootFound { prompt_id: prompt.id, item },
-            PendingPromptKind::EnemyEncounter { enemies, primary_enemy } => {
-                Interrupt::EnemyEncounter { prompt_id: prompt.id, enemies, primary_enemy }
+            PendingPromptKind::EnemyEncounter { enemies, primary_enemy, retreat_eligible } => {
+                Interrupt::EnemyEncounter {
+                    prompt_id: prompt.id,
+                    enemies,
+                    primary_enemy,
+                    retreat_eligible,
+                }
             }
             PendingPromptKind::DoorBlocked { pos } => {
                 Interrupt::DoorBlocked { prompt_id: prompt.id, pos }
@@ -424,9 +488,33 @@ impl Game {
             })
             .map(|(id, _)| id)
             .collect();
-        enemies.sort_by_key(|id| {
-            let actor = &self.state.actors[*id];
-            (manhattan(pos, actor.pos), actor.pos.y, actor.pos.x, actor.kind)
+        enemies.sort_by(|a_id, b_id| {
+            let a = &self.state.actors[*a_id];
+            let b = &self.state.actors[*b_id];
+
+            for tag in &self.state.policy.target_priority {
+                let cmp = match tag {
+                    TargetTag::Nearest => manhattan(pos, a.pos).cmp(&manhattan(pos, b.pos)),
+                    TargetTag::LowestHp => a.hp.cmp(&b.hp),
+                };
+                if cmp != std::cmp::Ordering::Equal {
+                    return cmp;
+                }
+            }
+
+            let dist_cmp = manhattan(pos, a.pos).cmp(&manhattan(pos, b.pos));
+            if dist_cmp != std::cmp::Ordering::Equal {
+                return dist_cmp;
+            }
+            let y_cmp = a.pos.y.cmp(&b.pos.y);
+            if y_cmp != std::cmp::Ordering::Equal {
+                return y_cmp;
+            }
+            let x_cmp = a.pos.x.cmp(&b.pos.x);
+            if x_cmp != std::cmp::Ordering::Equal {
+                return x_cmp;
+            }
+            a.kind.cmp(&b.kind)
         });
         enemies
     }
@@ -859,6 +947,9 @@ mod tests {
             pos,
             hp: 10,
             max_hp: 10,
+            attack: 2,
+            defense: 0,
+            active_weapon_slot: WeaponSlot::Primary,
             next_action_tick: 12,
             speed: 12,
         };
@@ -869,7 +960,7 @@ mod tests {
 
     #[test]
     fn starter_layout_has_expected_rooms_door_hazards_and_spawns() {
-        let game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
 
         let expected_player = Pos { y: 5, x: 4 };
         assert_eq!(game.state.actors[game.state.player_id].pos, expected_player);
@@ -903,7 +994,7 @@ mod tests {
 
     #[test]
     fn starter_layout_auto_flow_reaches_a_multi_enemy_encounter() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         let mut saw_multi_enemy_interrupt = false;
         let mut encounter_sizes: Vec<(u64, Pos, usize)> = Vec::new();
 
@@ -966,7 +1057,7 @@ mod tests {
 
     #[test]
     fn movement_updates_visibility_and_expands_discovery() {
-        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(123, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
 
@@ -1073,7 +1164,7 @@ mod tests {
 
     #[test]
     fn threat_avoidance_intent_is_reused_without_retarget_replan() {
-        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(123, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
 
@@ -1118,7 +1209,7 @@ mod tests {
 
     #[test]
     fn advance_uses_hazard_path_for_threat_avoidance_intent() {
-        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(123, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
 
@@ -1197,7 +1288,7 @@ mod tests {
 
     #[test]
     fn door_interrupt_and_open_flow() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
         let (map, pp, dp) = closed_door_choke_fixture();
@@ -1228,7 +1319,7 @@ mod tests {
 
     #[test]
     fn door_interrupt_open_then_resume_moves_forward() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
         let (map, start, door) = closed_door_choke_fixture();
@@ -1258,7 +1349,7 @@ mod tests {
 
     #[test]
     fn unchanged_intent_does_not_duplicate_reason_change_log() {
-        let mut game = Game::new(123, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(123, &ContentPack::default(), GameMode::Ironman);
         if let AdvanceStopReason::Interrupted(Interrupt::LootFound { prompt_id, .. }) =
             game.advance(1).stop_reason
         {
@@ -1278,7 +1369,7 @@ mod tests {
 
     #[test]
     fn path_len_only_change_does_not_emit_auto_reason_changed() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
         let mut map = Map::new(12, 7);
@@ -1319,7 +1410,7 @@ mod tests {
 
     #[test]
     fn auto_reason_changed_emits_only_on_reason_or_target_changes() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
         let mut map = Map::new(10, 7);
@@ -1398,7 +1489,7 @@ mod tests {
 
     #[test]
     fn multi_enemy_interrupt_orders_enemies_and_sets_primary() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
 
@@ -1423,8 +1514,39 @@ mod tests {
     }
 
     #[test]
+    fn policy_driven_target_selection_by_lowest_hp() {
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        // Update policy to LowestHP first
+        game.state.policy.target_priority = vec![TargetTag::LowestHp, TargetTag::Nearest];
+
+        let player = game.state.actors[game.state.player_id].pos;
+
+        let high_hp_enemy = add_goblin(&mut game, Pos { y: player.y, x: player.x + 1 });
+        game.state.actors[high_hp_enemy].hp = 10;
+
+        let low_hp_enemy = add_goblin(&mut game, Pos { y: player.y + 1, x: player.x });
+        game.state.actors[low_hp_enemy].hp = 3;
+
+        let result = game.advance(1);
+        match result.stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                enemies,
+                primary_enemy,
+                ..
+            }) => {
+                assert_eq!(primary_enemy, low_hp_enemy);
+                assert_eq!(enemies, vec![low_hp_enemy, high_hp_enemy]);
+            }
+            other => panic!("expected enemy encounter interrupt, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn avoid_suppresses_only_primary_enemy_and_still_interrupts_on_other_enemy() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
 
@@ -1460,13 +1582,14 @@ mod tests {
 
     #[test]
     fn fighting_primary_enemy_leaves_other_enemy_to_interrupt_next_tick() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
 
         let player = game.state.actors[game.state.player_id].pos;
         let second = add_goblin(&mut game, Pos { y: player.y + 1, x: player.x });
         let first = add_goblin(&mut game, Pos { y: player.y, x: player.x + 1 });
+        game.state.actors[first].hp = 5; // Die in 1 hit
 
         let first_prompt = match game.advance(1).stop_reason {
             AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
@@ -1497,8 +1620,126 @@ mod tests {
     }
 
     #[test]
+    fn stance_modifiers_affect_combat_damage() {
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let player = game.state.actors[game.state.player_id].pos;
+        let enemy = add_goblin(&mut game, Pos { y: player.y, x: player.x + 1 });
+        game.state.actors[enemy].hp = 10;
+        game.state.actors[enemy].max_hp = 10;
+        game.state.actors[enemy].defense = 1;
+
+        // Player default atk = 5. Default stance = Balanced (+0atk).
+        // Damage = 5 - 1 = 4.
+        let prompt_balanced = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                prompt_id,
+                primary_enemy,
+                ..
+            }) => {
+                assert_eq!(primary_enemy, enemy);
+                prompt_id
+            }
+            _ => panic!("Missing encounter"),
+        };
+
+        game.apply_choice(prompt_balanced, Choice::Fight).unwrap();
+        assert_eq!(game.state.actors[enemy].hp, 6); // 10 - 4
+
+        // Enemy still alive, advance again should trigger another encounter immediately.
+        let prompt_aggressive = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { prompt_id, .. }) => {
+                prompt_id
+            }
+            _ => panic!("Missing encounter 2"),
+        };
+
+        // At Pause boundary, update policy to Aggressive (+2atk). Damage = 7 - 1 = 6.
+        game.apply_policy_update(PolicyUpdate::Stance(Stance::Aggressive)).unwrap();
+        game.apply_choice(prompt_aggressive, Choice::Fight).unwrap();
+
+        // Enemy should take 6 damage, leaving 0 HP, getting removed.
+        assert!(!game.state.actors.contains_key(enemy));
+    }
+
+    #[test]
+    fn retreat_eligible_is_true_when_hp_percent_is_below_threshold() {
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        game.state.policy.retreat_hp_threshold = 50;
+
+        let player = game.state.player_id;
+        game.state.actors[player].max_hp = 20;
+
+        let p_pos = game.state.actors[player].pos;
+
+        // Above threshold: 11/20 = 55%
+        game.state.actors[player].hp = 11;
+        let enemy1 = add_goblin(&mut game, Pos { y: p_pos.y, x: p_pos.x + 1 });
+        game.state.actors[enemy1].hp = 5; // Die in 1 hit
+
+        let prompt1 = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                retreat_eligible,
+                prompt_id,
+                ..
+            }) => {
+                assert!(!retreat_eligible, "Should not be eligible at 55% HP");
+                prompt_id
+            }
+            other => panic!("Missing encounter 1, got {other:?}"),
+        };
+
+        game.apply_choice(prompt1, Choice::Fight).unwrap();
+        assert!(!game.state.actors.contains_key(enemy1));
+
+        // At threshold: 10/20 = 50%
+        game.state.actors[player].hp = 10;
+        let p_pos = game.state.actors[player].pos;
+        let _enemy2 = add_goblin(&mut game, Pos { y: p_pos.y + 1, x: p_pos.x });
+
+        match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                retreat_eligible, ..
+            }) => {
+                assert!(retreat_eligible, "Should be eligible at 50% HP");
+            }
+            _ => panic!("Missing encounter 2"),
+        }
+    }
+
+    #[test]
+    fn swap_active_weapon_toggles_slot_and_consumes_ticks() {
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let p_id = game.state.player_id;
+
+        // Assert initial state
+        assert_eq!(game.state.actors[p_id].active_weapon_slot, WeaponSlot::Primary);
+        let start_ticks = game.state.actors[p_id].next_action_tick;
+
+        // Perform swap
+        game.apply_swap_weapon().expect("Swap should succeed at pause boundary");
+
+        // Verify slot and ticks
+        assert_eq!(game.state.actors[p_id].active_weapon_slot, WeaponSlot::Reserve);
+        assert_eq!(game.state.actors[p_id].next_action_tick, start_ticks + 10);
+
+        // Swap back
+        game.apply_swap_weapon().unwrap();
+        assert_eq!(game.state.actors[p_id].active_weapon_slot, WeaponSlot::Primary);
+        assert_eq!(game.state.actors[p_id].next_action_tick, start_ticks + 20);
+    }
+
+    #[test]
     fn suppressed_enemy_clears_after_it_is_no_longer_adjacent() {
-        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
         game.state.items.clear();
         game.state.actors.retain(|id, _| id == game.state.player_id);
 

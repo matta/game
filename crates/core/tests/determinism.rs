@@ -1,6 +1,6 @@
+use core::ContentPack;
 use core::journal::InputJournal;
 use core::replay::replay_to_end;
-use core::state::ContentPack;
 use core::{AdvanceStopReason, Choice, Game, GameMode, Interrupt};
 
 fn build_scripted_journal(seed: u64, content: &ContentPack) -> InputJournal {
@@ -30,7 +30,7 @@ fn build_scripted_journal(seed: u64, content: &ContentPack) -> InputJournal {
 
 #[test]
 fn test_determinism_identical_seeds_produce_same_hash() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
     let journal1 = build_scripted_journal(12345, &content);
     let journal2 = build_scripted_journal(12345, &content);
 
@@ -46,7 +46,7 @@ fn test_determinism_identical_seeds_produce_same_hash() {
 
 #[test]
 fn test_determinism_different_seeds_produce_different_hashes() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
     let journal1 = build_scripted_journal(123, &content);
     let journal2 = build_scripted_journal(456, &content);
 
@@ -61,7 +61,7 @@ fn test_determinism_different_seeds_produce_different_hashes() {
 
 #[test]
 fn test_deterministic_smoke_fixed_seed_stable_intent_and_log_sequence() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
 
     fn run_trace(seed: u64, content: &ContentPack) -> Vec<String> {
         let mut game = Game::new(seed, content, GameMode::Ironman);
@@ -104,7 +104,7 @@ fn test_deterministic_smoke_fixed_seed_stable_intent_and_log_sequence() {
 
 #[test]
 fn test_starter_layout_auto_run_hits_door_and_threat_avoidance_within_250_ticks() {
-    let content = ContentPack {};
+    let content = ContentPack::default();
     let mut game = Game::new(12345, &content, GameMode::Ironman);
 
     let mut saw_door_blocked = false;

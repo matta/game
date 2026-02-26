@@ -21,6 +21,7 @@ pub struct InputRecord {
 pub enum InputPayload {
     Choice { prompt_id: ChoicePromptId, choice: Choice },
     PolicyUpdate { tick_boundary: u64, update: PolicyUpdate },
+    SwapActiveWeapon { tick_boundary: u64 },
 }
 
 impl InputJournal {
@@ -43,5 +44,10 @@ impl InputJournal {
             seq,
             payload: InputPayload::PolicyUpdate { tick_boundary, update },
         });
+    }
+
+    pub fn append_swap_weapon(&mut self, tick_boundary: u64, seq: u64) {
+        self.inputs
+            .push(InputRecord { seq, payload: InputPayload::SwapActiveWeapon { tick_boundary } });
     }
 }
