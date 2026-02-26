@@ -1,8 +1,10 @@
 # Roguelike Project — Interrogation Phase Results (MVP v1)
 
 Author: Matt Armstrong  
-Status: Locked Decisions (Pre‑Architecture)  
+Status: Frozen (Archival, Non-Normative)  
 Scope: 1.0 MVP (20–40 minute runs)
+
+Normative source for active implementation decisions: `implementation.md`.
 
 ---
 
@@ -208,4 +210,3 @@ Ready to proceed to:
 - Module layout
 - CoreSim API design
 - Implementation roadmap from empty git repo to MVP 1.0
-

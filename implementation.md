@@ -21,8 +21,13 @@ A deterministic, ASCII-grid roguelike with:
 - Procedural dungeon floors + small authored vault templates
 - Branching dungeon structure
 - Ironman primary mode
-- Optional checkpoint-based easy mode
+- Optional checkpoint-based easy mode (time travel via full replay from tick 0)
+- Journal-based save/load (same-build compatibility only)
 - Fully deterministic seed-based runs
+
+Deferred post-MVP:
+- Snapshot-accelerated reloads (fast checkpoint restore without full replay)
+- Best-effort replay migration across code/content versions
 
 ---
 
@@ -40,9 +45,9 @@ crates/
 ```
 
 ## 2.1 Memory Management Strategy
-The `core` crate uses Generational Arenas (`slotmap`) for **actor** storage (player + monsters). This avoids borrow checker conflicts and prevents use-after-free errors when actors are created and destroyed during the simulation, without resorting to complex ECS frameworks.
+The `core` crate uses Generational Arenas (`slotmap`) for **actor** storage (player + monsters) and **item instance** storage (stable `ItemId`). This avoids borrow checker conflicts and prevents use-after-free errors when entities are created and destroyed during simulation, without resorting to complex ECS frameworks.
 
-Map tiles and items-on-ground remain **dense arrays/structs** inside the map data structure. This keeps serialization simple and avoids unnecessary indirection for data that doesn't need generational identity.
+Map tiles remain dense arrays/structs; each tile stores stable IDs/flags rather than positional indices for player-facing references. Static content definitions (item/perk/god blueprints) remain dense arrays in `content`.
 
 ---
 
@@ -53,59 +58,123 @@ Requirements to guarantee identical runs across macOS and Linux:
 - No `thread_rng()` or system time access in `core`.
 - Avoid floating-point nondeterminism (use integer math exclusively for logic/combat).
 - All randomness injected explicitly.
+- Deterministic containers/iteration: avoid `HashMap`/`HashSet` in simulation-critical paths unless keys are copied into a sorted buffer before iteration. Prefer `Vec` + explicit sort, or `BTreeMap`/`BTreeSet`.
+- Deterministic tie-breakers:
+  - Turn order: `(next_action_tick, speed_desc, spawn_seq, entity_id)`.
+  - Path tie resolution: fixed neighbor expansion order `Up, Right, Down, Left`.
+- Stable snapshot hash: computed from canonical serialized state (`seed`, `tick`, `RunState`, last `prompt_id`) with a fixed hash function (`xxh3_64`).
 
 Game struct sketch:
 
 ```rust
 pub struct Game {
-  pub seed: u64,
-  pub tick: u64,
-  pub rng: ChaCha8Rng,
-  pub state: RunState,
-  pub log: Vec<LogEvent>,
+  seed: u64,
+  tick: u64,
+  rng: ChaCha8Rng,
+  state: RunState,
+  log: Vec<LogEvent>,
+  next_input_seq: u64,
 }
 ```
 
 Core API:
 
 ```rust
+pub enum StepOutcome {
+  Interrupted(Interrupt),
+  AdvancedNoInterrupt { ticks: u32 },
+  Finished(RunOutcome),
+}
+
 impl Game {
   pub fn new(seed: u64, content: &ContentPack, mode: GameMode) -> Self;
-  pub fn set_policy(&mut self, policy: Policy);
-  pub fn step_until_interrupt(&mut self, max_steps: u32) -> Option<Interrupt>;
-  pub fn apply_choice(&mut self, choice: Choice) -> Result<(), GameError>;
-  pub fn is_finished(&self) -> Option<RunOutcome>;
+  pub fn step_until_interrupt(&mut self, max_steps: u32) -> StepOutcome;
+  pub fn apply_choice(
+    &mut self,
+    prompt_id: ChoicePromptId,
+    choice: Choice
+  ) -> Result<(), GameError>;
+  pub fn apply_policy_update(&mut self, update: PolicyUpdate) -> Result<(), GameError>;
+  pub fn current_tick(&self) -> u64;
   pub fn snapshot_hash(&self) -> u64;
 }
 ```
 
-## 3.1 Replay Specification
+Execution rule:
+- `app` auto mode calls `step_until_interrupt(1)` (one simulation tick per loop iteration).
+- This creates a deterministic pause opportunity between every tick.
+- User pause requests are honored at the next tick boundary.
 
-Replays record **seed + ordered choice log**, enabling deterministic replay of any run without Macroquad.
+## 3.1 Input Journal Specification
+
+Replays are represented as a versioned append-only **input journal** (all core inputs in order), enabling deterministic replay without Macroquad.
 
 ```rust
-pub struct RunReplay {
+pub struct InputJournal {
+  pub format_version: u16,
+  pub build_id: String,      // git SHA or build fingerprint
+  pub content_hash: u64,     // content pack fingerprint
   pub seed: u64,
-  pub choices: Vec<ChoiceRecord>,
+  pub events: Vec<InputEvent>,
+  pub checkpoints: Vec<CheckpointMarker>, // easy-mode restore candidates
 }
 
-pub struct ChoiceRecord {
-  pub prompt_id: ChoicePromptId, // validates correct choice at correct interrupt
-  pub choice: Choice,
+pub struct InputEvent {
+  pub seq: u64,
+  pub tick_boundary: u64, // boundary where event is accepted
+  pub payload: InputPayload,
+}
+
+pub enum InputPayload {
+  Choice { prompt_id: ChoicePromptId, choice: Choice },
+  PolicyUpdate(PolicyUpdate), // takes effect on the next simulation tick
+}
+
+pub struct CheckpointMarker {
+  pub id: u32,
+  pub tick_boundary: u64,
+  pub input_seq: u64,      // restore by replaying events up to this sequence
+  pub reason: CheckpointReason,
+}
+
+pub enum CheckpointReason {
+  GodChoiceResolved,
+  LevelChanged,
+  BranchCommitted,
+  CampResolved,
 }
 ```
 
-The `ChoicePromptId` is emitted by `core` with each `Interrupt`, allowing the replay runner to verify it is applying the right choice at the right time. This makes debugging and sharing runs trivial.
+`ChoicePromptId` is emitted by `core` with each `Interrupt`, and must match on `apply_choice(...)`.  
+MVP compatibility guarantee: journal replay is supported only when `build_id` and `content_hash` match.
 
 ## 3.2 Core / App Communication Contract
 
-- `app` provides **pure inputs**: `Choice`, `PolicyUpdate`.
-- `core` returns **pure outputs**: `Interrupt`, `RenderState`, `LogEvent`.
+- `app` provides **pure inputs**: `InputPayload`.
+- `core` returns **pure outputs**: `Interrupt`, `CoreView`, `LogEvent`.
 - `app` never reads or writes `core` internals except through the public API.
 
-The `app` crate controls the execution loop, deciding whether to auto-explore or wait for user input (e.g., when paused). The `core` only receives inputs that mutate the simulation state, remaining entirely ignorant of "Auto" versus "Manual" states.
+The `app` crate controls the execution loop, deciding whether to auto-explore or wait for user input (e.g., when paused). The `core` only receives inputs that mutate simulation state, remaining entirely ignorant of UI concepts.
+
+Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
 
 This contract enables a headless `tools/replay_runner` that exercises `core` without any rendering dependency.
+
+## 3.3 Pause/Policy Timing Model
+
+- Auto-explore runs by repeatedly advancing one tick at a time.
+- After each tick, control returns to the app loop.
+- If the user requested pause, the app stops auto-advancement at that boundary.
+- While paused, the user may issue one or more policy updates.
+- On resume, the next tick uses the latest accepted policy state.
+- Replay applies policy updates at the recorded boundary before simulating the next tick.
+
+## 3.4 Easy Mode Checkpoint Model
+
+- Easy mode uses engine-authored checkpoint markers at deterministic boundaries (e.g., resolved god choice, level change, branch commitment, resolved camp).
+- On death, player may select any unlocked checkpoint.
+- Restore always replays from tick `0` to the checkpoint marker's `input_seq`; no state snapshot fast-path in MVP.
+- Checkpoint markers are persisted in the run save and must be consistent with deterministic replay.
 
 ---
 
@@ -114,10 +183,12 @@ This contract enables a headless `tools/replay_runner` that exercises `core` wit
 ## 4.1 Core Data Structures
 
 - `EntityId` (managed via `slotmap`)
+- `ItemId` (managed via `slotmap`; stable in interrupt/replay flows)
 - `Actor` (player or monster)
 - `Stats` (hp, atk, def, speed, limited resists)
 - `Status` (poison, bleed, slow — minimal set)
 - `Equipment` (small fixed slot set)
+- `ItemInstance`
 - `Perk`
 - `God` (passive modifiers only)
 - `Policy`
@@ -134,14 +205,15 @@ pub struct Policy {
   pub position_intent: PositionIntent,
   pub resource_aggression: Aggro,
   pub exploration_mode: ExploreMode,
+  pub loadout_rule: LoadoutRule, // pre-combat swap intent
 }
 ```
 
 ## 4.3 Spatial Systems
 All spatial algorithms live strictly within `core`, with no dependency on external rendering libraries.
 
-- **Pathing (Milestone 2a):** A* pathing on known-walkable tiles. Future-proofs the spatial architecture against weighted terrain.
-- **FOV (Milestone 2b or later):** Field of View + frontier selection (unknown-adjacent tiles) added once the interrupt loop and keep/discard/fight/avoid flow are already fun. Defer unless exploration requires it sooner.
+- **Pathing + minimal exploration intent (Milestone 2a):** A* pathing on discovered known-walkable tiles plus a simple frontier target selection (nearest unknown-adjacent discovered tile).
+- **FOV refinement (Milestone 2b):** Full Field of View + improved frontier selection and hazard-aware movement.
 
 ---
 
@@ -156,7 +228,7 @@ Interrupt types (MVP subset):
 - CampChoice
 - PerkChoice
 - BossEncounter
-- CheckpointAvailable (easy mode)
+- CheckpointAvailable (easy mode only)
 
 ---
 
@@ -211,31 +283,36 @@ Input:
 *Done when: `cargo test` passes cleanly.*
 
 ## Milestone 1 — CoreSim Skeleton & Initial UI (10–12 hrs)
-- Set up `slotmap` (actors only) in `core` and `ChaCha8Rng`.
+- Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
 - Implement `RunState` and basic map structure (dense tile arrays).
-- Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract: app sends pure inputs, core returns pure outputs.
-- Implement Player + 1 enemy, Turn engine, and a fake loot interrupt.
-*Done when: identical logs for identical seeds, and it visually renders.*
+- Implement `StepOutcome` API and prompt-bound `apply_choice`.
+- Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
+- Implement tick-granular auto loop (`step_until_interrupt(1)`) with pause-at-next-boundary behavior.
+- Implement Player + 1 enemy, turn engine, and fake loot interrupt.
+*Done when: repeated runs with the same seed produce identical interrupt sequence + snapshot hash.*
 
 ## Milestone 2a — Basic Pathing & Interrupt Loop (10–12 hrs)
-- Implement A* pathing on known-walkable tiles in `core` (to support future weighted terrain logic).
+- Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
+- Implement minimal frontier selection (nearest unknown-adjacent discovered tile).
 - Render ASCII map and display event log in `app`.
 - Implement the `step_until_interrupt()` API for auto-explore.
-- Implement keep/discard and fight vs avoid interrupt panels.
-*Done when: 5-minute auto-exploring run is playable and pauses on interrupts.*
+- Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
+*Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and movement rationale is understandable.*
 
 ## Milestone 2b — FOV & Exploration Intelligence (6–8 hrs)
 - Implement Field of View in `core`.
-- Add frontier selection: pathing toward unknown-adjacent tiles.
+- Improve frontier selection using visible frontier and danger scoring.
 - Handle edge cases: unknown tiles, doors, hazards, soft-danger avoidance.
 *Done when: explore feels intentional — the player understands why the character moved where it did.*
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
 - Multi-enemy encounters.
-- Implement the full `Policy` struct (Target priority, Stance modifiers, Consumable thresholds, Retreat logic).
+- Implement full `Policy` controls (Target priority, Stance modifiers, Consumable thresholds, Retreat logic, pre-combat loadout rule).
+- Restrict policy updates to paused tick boundaries and journal every accepted update with boundary tick.
 - Implement a micro-set of test content (2 weapons, 1 consumable, 2 perks) to validate policy behaviors.
 - Wire UI to update policy knobs.
-*Done when: automated combat resolves based on policy choices and builds feel distinct.*
+- Add baseline fairness instrumentation: death-cause reason codes and a compact per-turn threat trace.
+*Done when: automated combat resolves from policy/build choices and death traces explain what happened.*
 
 ## Milestone 4 — Floors + Branching (12–15 hrs)
 - Multiple floors.
@@ -252,16 +329,18 @@ Input:
 
 ## Milestone 6 — Fairness Tooling (8–10 hrs)
 - Threat summaries.
-- Death cause stack.
 - Seed display + copy.
 - Determinism hash.
+- Death-recap UI using reason codes from Milestone 3.
 *Done when: deaths are reproducible and explainable to the player.*
 
-## Milestone 7 — Saving Modes (8–10 hrs)
-- Implement append-only `RunReplay` logging. Load games by fast-forwarding the replay payload.
-- Checkpoint easy mode.
-- Snapshot system.
-*Done when: rewind works reliably.*
+## Milestone 7 — Persistence, Replay, and Easy Mode Checkpoints (8–10 hrs)
+- Implement append-only `InputJournal` logging.
+- Load games by fast-forwarding journal events.
+- Add deterministic checkpoint marker generation at engine-authored boundaries.
+- Implement death flow to select checkpoint and restore via replay from tick 0 to marker `input_seq`.
+- Use atomic writes + checksums for crash-safe persistence.
+*Done when: save/load, replay, and checkpoint time travel are reliable within the same build/content fingerprint.*
 
 ## Milestone 8 — Release Packaging (8–10 hrs)
 - Versioning and final balance pass.
@@ -295,3 +374,28 @@ Windows support: optional later.
 7. Roguelike identity with automation twist
 
 ---
+
+# 11. Test Strategy and Complexity Analysis (MVP)
+
+Goal: maximize bug-catching per engineering hour, given a ~120 hour budget.
+
+| Test Layer | Value | Cost to Build | Ongoing Maintenance | MVP Decision |
+| --- | --- | --- | --- | --- |
+| Unit tests for combat, pathing, interrupt validation | High | Low | Low | Include |
+| Determinism smoke tests (same seed => same hash/interrupt trace in same build) | High | Low | Low | Include |
+| Property tests (`proptest`) for invariants (no negative HP, no invalid target IDs, replay/apply equivalence) | High | Medium | Low-Medium | Include (small targeted set) |
+| Golden replay files committed to repo | Medium | Medium-High | High (content churn rewrites files) | Defer |
+| Cross-version replay compatibility tests | Low for MVP | High | High | Defer post-MVP |
+
+Rationale:
+- Golden replay files are expensive during rapid content iteration because expected outputs churn frequently.
+- Small, focused property tests catch broad logic bugs without coupling tests to unstable content details.
+- Determinism smoke tests and replay round-trip tests (including checkpoint restore equivalence) provide core confidence with low maintenance.
+
+---
+
+# 12. Post-MVP Backlog
+
+- Snapshot-accelerated checkpoint restore for faster reloads.
+- Best-effort migration layer for replay files across content/code versions.
+- Optional golden replay corpus once content format stabilizes.
