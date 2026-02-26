@@ -153,6 +153,7 @@ pub struct GameState {
     pub player_id: EntityId,
     pub auto_intent: Option<AutoExploreIntent>,
     pub policy: Policy,
+    pub threat_trace: std::collections::VecDeque<ThreatTrace>,
 }
 
 #[cfg(test)]

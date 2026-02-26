@@ -9,9 +9,18 @@ use crate::types::*;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PendingPromptKind {
-    Loot { item: ItemId },
-    EnemyEncounter { enemies: Vec<EntityId>, primary_enemy: EntityId, retreat_eligible: bool },
-    DoorBlocked { pos: Pos },
+    Loot {
+        item: ItemId,
+    },
+    EnemyEncounter {
+        enemies: Vec<EntityId>,
+        primary_enemy: EntityId,
+        retreat_eligible: bool,
+        threat: ThreatSummary,
+    },
+    DoorBlocked {
+        pos: Pos,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -181,6 +190,7 @@ impl Game {
                 player_id,
                 auto_intent: None,
                 policy: Policy::default(),
+                threat_trace: std::collections::VecDeque::new(),
             },
             log: Vec::new(),
             next_input_seq: 0,
@@ -238,6 +248,41 @@ impl Game {
 
             self.tick += 1;
             steps += 1;
+
+            let visible_enemy_count = self
+                .state
+                .actors
+                .iter()
+                .filter(|(id, actor)| {
+                    *id != self.state.player_id && self.state.map.is_visible(actor.pos)
+                })
+                .count();
+            let min_enemy_distance = self
+                .state
+                .actors
+                .iter()
+                .filter_map(|(id, actor)| {
+                    if id != self.state.player_id && self.state.map.is_visible(actor.pos) {
+                        Some(manhattan(self.state.actors[self.state.player_id].pos, actor.pos))
+                    } else {
+                        None
+                    }
+                })
+                .min();
+            let p_hp_pct = (self.state.actors[self.state.player_id].hp * 100)
+                / self.state.actors[self.state.player_id].max_hp;
+            let retreat_triggered = p_hp_pct <= (self.state.policy.retreat_hp_threshold as i32)
+                && visible_enemy_count > 0;
+            self.state.threat_trace.push_front(ThreatTrace {
+                tick: self.tick,
+                visible_enemy_count,
+                min_enemy_distance,
+                retreat_triggered,
+            });
+            if self.state.threat_trace.len() > 32 {
+                self.state.threat_trace.pop_back();
+            }
+
             if self.tick > 400 {
                 return AdvanceResult {
                     simulated_ticks: steps,
@@ -436,9 +481,24 @@ impl Game {
         let hp_percent = (player.hp * 100) / player.max_hp;
         let retreat_eligible = hp_percent <= (self.state.policy.retreat_hp_threshold as i32);
 
+        let mut tags = Vec::new();
+        for &e_id in &enemies {
+            if self.state.actors.get(e_id).is_some_and(|e| e.kind == ActorKind::Goblin) {
+                tags.push(DangerTag::Melee);
+            }
+        }
+        tags.sort();
+        tags.dedup();
+        let threat = ThreatSummary { danger_tags: tags };
+
         let prompt = PendingPrompt {
             id: ChoicePromptId(self.next_input_seq),
-            kind: PendingPromptKind::EnemyEncounter { enemies, primary_enemy, retreat_eligible },
+            kind: PendingPromptKind::EnemyEncounter {
+                enemies,
+                primary_enemy,
+                retreat_eligible,
+                threat: threat.clone(),
+            },
         };
         self.pending_prompt = Some(prompt.clone());
         AdvanceResult {
@@ -460,14 +520,18 @@ impl Game {
     fn prompt_to_interrupt(&self, prompt: PendingPrompt) -> Interrupt {
         match prompt.kind {
             PendingPromptKind::Loot { item } => Interrupt::LootFound { prompt_id: prompt.id, item },
-            PendingPromptKind::EnemyEncounter { enemies, primary_enemy, retreat_eligible } => {
-                Interrupt::EnemyEncounter {
-                    prompt_id: prompt.id,
-                    enemies,
-                    primary_enemy,
-                    retreat_eligible,
-                }
-            }
+            PendingPromptKind::EnemyEncounter {
+                enemies,
+                primary_enemy,
+                retreat_eligible,
+                threat,
+            } => Interrupt::EnemyEncounter {
+                prompt_id: prompt.id,
+                enemies,
+                primary_enemy,
+                retreat_eligible,
+                threat,
+            },
             PendingPromptKind::DoorBlocked { pos } => {
                 Interrupt::DoorBlocked { prompt_id: prompt.id, pos }
             }

@@ -38,10 +38,29 @@ pub enum Choice {
     OpenDoor,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeathCause {
+    Damage,
+    Poison,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RunOutcome {
     Victory,
-    Defeat,
+    Defeat(DeathCause),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum DangerTag {
+    Melee,
+    Ranged,
+    Poison,
+    Burst,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreatSummary {
+    pub danger_tags: Vec<DangerTag>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +74,7 @@ pub enum Interrupt {
         enemies: Vec<EntityId>,
         primary_enemy: EntityId,
         retreat_eligible: bool,
+        threat: ThreatSummary,
     },
     DoorBlocked {
         prompt_id: ChoicePromptId,
@@ -106,6 +126,14 @@ pub struct AutoExploreIntent {
     pub target: Pos,
     pub reason: AutoReason,
     pub path_len: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreatTrace {
+    pub tick: u64,
+    pub visible_enemy_count: usize,
+    pub min_enemy_distance: Option<u32>,
+    pub retreat_triggered: bool,
 }
 
 pub enum GameMode {
@@ -179,6 +207,31 @@ impl Default for Policy {
             resource_aggression: Aggro::Conserve,
             exploration_mode: ExploreMode::Thorough,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_danger_tag_ordering_and_threat_summary_dedup() {
+        let mut tags = vec![
+            DangerTag::Burst,
+            DangerTag::Melee,
+            DangerTag::Poison,
+            DangerTag::Ranged,
+            DangerTag::Melee,
+        ];
+        tags.sort();
+        tags.dedup();
+        let summary = ThreatSummary { danger_tags: tags };
+
+        // Ord derives sequentially: Melee, Ranged, Poison, Burst
+        assert_eq!(
+            summary.danger_tags,
+            vec![DangerTag::Melee, DangerTag::Ranged, DangerTag::Poison, DangerTag::Burst,]
+        );
     }
 }
 

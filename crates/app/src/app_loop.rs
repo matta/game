@@ -11,7 +11,7 @@ pub enum AppMode {
         prompt_id: ChoicePromptId,
         auto_play_suspended: bool,
     },
-    Finished,
+    Finished(core::RunOutcome),
 }
 
 #[derive(Default)]
@@ -45,6 +45,49 @@ impl AppState {
                     core::Stance::Defensive => core::Stance::Aggressive,
                 };
                 let _ = game.apply_policy_update(core::PolicyUpdate::Stance(next));
+            }
+            if keys_pressed.contains(&KeyCode::P) {
+                let next = match game.state().policy.target_priority.first() {
+                    Some(core::TargetTag::Nearest) => vec![core::TargetTag::LowestHp],
+                    _ => vec![core::TargetTag::Nearest, core::TargetTag::LowestHp],
+                };
+                let _ = game.apply_policy_update(core::PolicyUpdate::TargetPriority(next));
+            }
+            if keys_pressed.contains(&KeyCode::R) {
+                let current = game.state().policy.retreat_hp_threshold;
+                let next = if current < 90 { current + 10 } else { 0 };
+                let _ = game.apply_policy_update(core::PolicyUpdate::RetreatHpThreshold(next));
+            }
+            if keys_pressed.contains(&KeyCode::H) {
+                let next = match game.state().policy.auto_heal_if_below_threshold {
+                    None => Some(30),
+                    Some(80) => None,
+                    Some(v) => Some(v + 10),
+                };
+                let _ =
+                    game.apply_policy_update(core::PolicyUpdate::AutoHealIfBelowThreshold(next));
+            }
+            if keys_pressed.contains(&KeyCode::I) {
+                let next = match game.state().policy.position_intent {
+                    core::PositionIntent::HoldGround => core::PositionIntent::AdvanceToMelee,
+                    core::PositionIntent::AdvanceToMelee => {
+                        core::PositionIntent::FleeToNearestExploredTile
+                    }
+                    core::PositionIntent::FleeToNearestExploredTile => {
+                        core::PositionIntent::HoldGround
+                    }
+                };
+                let _ = game.apply_policy_update(core::PolicyUpdate::PositionIntent(next));
+            }
+            if keys_pressed.contains(&KeyCode::E) {
+                let _ = game.apply_policy_update(core::PolicyUpdate::ExplorationMode(
+                    core::ExploreMode::Thorough,
+                ));
+            }
+            if keys_pressed.contains(&KeyCode::G) {
+                let _ = game.apply_policy_update(core::PolicyUpdate::ResourceAggression(
+                    core::Aggro::Conserve,
+                ));
             }
         };
 
@@ -107,7 +150,7 @@ impl AppState {
 
                 handle_policy(game);
             }
-            AppMode::Finished => {
+            AppMode::Finished(_) => {
                 // No inputs valid after completion
             }
         }
@@ -134,8 +177,8 @@ impl AppState {
                         auto_play_suspended: matches!(self.mode, AppMode::AutoPlay),
                     };
                 }
-                AdvanceStopReason::Finished(_) => {
-                    self.mode = AppMode::Finished;
+                AdvanceStopReason::Finished(outcome) => {
+                    self.mode = AppMode::Finished(outcome);
                 }
                 AdvanceStopReason::BudgetExhausted => {
                     // Continuing auto play on next frame

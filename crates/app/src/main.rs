@@ -18,9 +18,21 @@ async fn main() {
         if is_key_pressed(KeyCode::Right) {
             keys_pressed.push(KeyCode::Right);
         }
-        for key in
-            [KeyCode::L, KeyCode::D, KeyCode::F, KeyCode::A, KeyCode::O, KeyCode::M, KeyCode::T]
-        {
+        for key in [
+            KeyCode::L,
+            KeyCode::D,
+            KeyCode::F,
+            KeyCode::A,
+            KeyCode::O,
+            KeyCode::M,
+            KeyCode::T,
+            KeyCode::P,
+            KeyCode::R,
+            KeyCode::H,
+            KeyCode::I,
+            KeyCode::E,
+            KeyCode::G,
+        ] {
             if is_key_pressed(key) {
                 keys_pressed.push(key);
             }
@@ -37,11 +49,13 @@ async fn main() {
 
         let status = match app_state.mode {
             app::app_loop::AppMode::PendingPrompt { ref interrupt, .. } => prompt_text(interrupt),
-            app::app_loop::AppMode::Finished => "Finished (Victory!)",
-            app::app_loop::AppMode::AutoPlay => "Auto-Explore ON (Space to pause)",
-            app::app_loop::AppMode::Paused => "Paused (Space to Auto-Explore, Right to step)",
+            app::app_loop::AppMode::Finished(outcome) => format!("Finished ({:?})", outcome),
+            app::app_loop::AppMode::AutoPlay => "Auto-Explore ON (Space to pause)".to_string(),
+            app::app_loop::AppMode::Paused => {
+                "Paused (Space to Auto-Explore, Right to step)".to_string()
+            }
         };
-        draw_text(status, 20.0, 30.0, 20.0, WHITE);
+        draw_text(&status, 20.0, 30.0, 20.0, WHITE);
         draw_text(&format!("Tick: {}", game.current_tick()), 20.0, 350.0, 20.0, WHITE);
 
         let intent_text = if let Some(intent) = game.state().auto_intent {
@@ -58,6 +72,52 @@ async fn main() {
         draw_text("Policy: ", 20.0, 420.0, 20.0, YELLOW);
         draw_text(&format!("[M]ode: {:?}", policy.fight_or_avoid), 20.0, 440.0, 18.0, LIGHTGRAY);
         draw_text(&format!("s[T]ance: {:?}", policy.stance), 20.0, 460.0, 18.0, LIGHTGRAY);
+        draw_text(
+            &format!("[P]riority: {:?}", policy.target_priority),
+            20.0,
+            480.0,
+            18.0,
+            LIGHTGRAY,
+        );
+        draw_text(
+            &format!("[R]etreat HP: {}%", policy.retreat_hp_threshold),
+            20.0,
+            500.0,
+            18.0,
+            LIGHTGRAY,
+        );
+        draw_text(
+            &format!("[H]eal: {:?}", policy.auto_heal_if_below_threshold),
+            20.0,
+            520.0,
+            18.0,
+            LIGHTGRAY,
+        );
+        draw_text(&format!("[I]ntent: {:?}", policy.position_intent), 20.0, 540.0, 18.0, LIGHTGRAY);
+        draw_text(
+            &format!("[E]xplore: {:?}", policy.exploration_mode),
+            20.0,
+            560.0,
+            18.0,
+            LIGHTGRAY,
+        );
+        draw_text(
+            &format!("[G]reed: {:?}", policy.resource_aggression),
+            20.0,
+            580.0,
+            18.0,
+            LIGHTGRAY,
+        );
+
+        draw_text("Threat Trace:", 240.0, 420.0, 20.0, RED);
+        for (i, trace) in game.state().threat_trace.iter().take(5).enumerate() {
+            let desc = format!(
+                "T{}: {} vis, dist {:?}",
+                trace.tick, trace.visible_enemy_count, trace.min_enemy_distance
+            );
+            let color = if trace.retreat_triggered { ORANGE } else { LIGHTGRAY };
+            draw_text(&desc, 240.0, 440.0 + (i as f32 * 20.0), 18.0, color);
+        }
 
         next_frame().await
     }
@@ -138,11 +198,13 @@ fn draw_event_log(game: &Game, left: f32, top: f32, line_height: f32) {
     }
 }
 
-fn prompt_text(interrupt: &Interrupt) -> &'static str {
+fn prompt_text(interrupt: &Interrupt) -> String {
     match interrupt {
-        Interrupt::LootFound { .. } => "INTERRUPT: Loot found (L=keep, D=discard)",
-        Interrupt::EnemyEncounter { .. } => "INTERRUPT: Enemy sighted (F=fight, A=avoid)",
-        Interrupt::DoorBlocked { .. } => "INTERRUPT: Door blocked (O=open)",
+        Interrupt::LootFound { .. } => "INTERRUPT: Loot found (L=keep, D=discard)".to_string(),
+        Interrupt::EnemyEncounter { threat, .. } => {
+            format!("INTERRUPT: Enemy sighted (F=fight, A=avoid) Tags: {:?}", threat.danger_tags)
+        }
+        Interrupt::DoorBlocked { .. } => "INTERRUPT: Door blocked (O=open)".to_string(),
     }
 }
 

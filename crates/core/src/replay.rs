@@ -146,6 +146,62 @@ mod tests {
     }
 
     #[test]
+    fn test_replay_policy_edit_resume_equivalence() {
+        let content = ContentPack::default();
+        let mut game1 = Game::new(1234, &content, GameMode::Ironman);
+        let mut journal = InputJournal::new(1234);
+
+        let mut seq = 0;
+        let mut policy_edited = false;
+
+        loop {
+            let res = game1.advance(20);
+            match res.stop_reason {
+                AdvanceStopReason::Finished(_) => break,
+                AdvanceStopReason::Interrupted(interrupt) => {
+                    // edit policy during interrupt
+                    if !policy_edited {
+                        game1
+                            .apply_policy_update(PolicyUpdate::TargetPriority(vec![
+                                crate::types::TargetTag::LowestHp,
+                            ]))
+                            .unwrap();
+                        journal.append_policy_update(
+                            seq,
+                            PolicyUpdate::TargetPriority(vec![crate::types::TargetTag::LowestHp]),
+                            seq,
+                        );
+                        policy_edited = true;
+                    }
+                    match interrupt {
+                        crate::types::Interrupt::DoorBlocked { prompt_id, .. } => {
+                            game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
+                            journal.append_choice(prompt_id, Choice::OpenDoor, seq);
+                            seq += 1;
+                        }
+                        crate::types::Interrupt::EnemyEncounter { prompt_id, .. } => {
+                            game1.apply_choice(prompt_id, Choice::Fight).unwrap();
+                            journal.append_choice(prompt_id, Choice::Fight, seq);
+                            seq += 1;
+                        }
+                        crate::types::Interrupt::LootFound { prompt_id, .. } => {
+                            game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
+                            journal.append_choice(prompt_id, Choice::KeepLoot, seq);
+                            seq += 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let hash1 = game1.snapshot_hash();
+        let replay_res = replay_to_end(&content, &journal).unwrap();
+
+        assert_eq!(hash1, replay_res.final_snapshot_hash);
+    }
+
+    #[test]
     fn test_replay_swap_weapon_equivalence() {
         let content = ContentPack::default();
         let mut game1 = Game::new(777, &content, GameMode::Ironman);

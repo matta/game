@@ -638,12 +638,12 @@ Execution guardrails for all Milestone 3 passes:
 - **c) Architecture & Maintainability:** Combat deltas and swap timing are explicit numeric rules with deterministic tests, reducing ambiguity and making future balancing/refactors safer.
 
 ### Milestone 3e — UI Wiring + Fairness Instrumentation (2–3 hrs)
-- [ ] Add app controls to edit all MVP policy knobs while paused; disallow edits while running.
-- [ ] Add encounter panel rendering for deterministic `ThreatSummary` with sorted danger tags.
-- [ ] Add baseline death-cause reason codes and surface the reason code in defeat UI/log output.
-- [ ] Add compact per-turn threat trace ring buffer (latest `32` entries) with deterministic fields: `tick`, `visible_enemy_count`, `min_enemy_distance`, `retreat_triggered`.
-- [ ] Add tests ensuring `ThreatSummary` tag ordering is deterministic and stable across repeated runs with identical inputs.
-- [ ] Add integration test validating policy edit -> resume -> resulting behavior and logs are replay-stable.
+- [x] Add app controls to edit all MVP policy knobs while paused; disallow edits while running.
+- [x] Add encounter panel rendering for deterministic `ThreatSummary` with sorted danger tags.
+- [x] Add baseline death-cause reason codes and surface the reason code in defeat UI/log output.
+- [x] Add compact per-turn threat trace ring buffer (latest `32` entries) with deterministic fields: `tick`, `visible_enemy_count`, `min_enemy_distance`, `retreat_triggered`.
+- [x] Add tests ensuring `ThreatSummary` tag ordering is deterministic and stable across repeated runs with identical inputs.
+- [x] Add integration test validating policy edit -> resume -> resulting behavior and logs are replay-stable.
 **Pass 3e Exit Criteria:**
 - **a) User Experience:** The player can fully configure policy from pause UI, inspect threat context before committing, and receive actionable defeat explanations instead of opaque losses. Policy choices have immediate, visible combat impact (targeting, stance behavior, retreat eligibility), and pre-combat loadout swaps feel fair because they consume deterministic time.
 - **b) Progress toward vision:** Completes the milestone’s fairness and transparency layer so policy decisions are explainable, debuggable, and consistent with the intended combat control surface. Delivers the first end-to-end “policy over micromovement” combat loop, backed by minimal content that proves knob effects are meaningful in actual encounters.
