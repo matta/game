@@ -6,14 +6,14 @@ use rand_chacha::rand_core::SeedableRng;
 use crate::state::{Actor, ContentPack, GameState, Item, Map};
 use crate::types::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum PendingPromptKind {
     Loot { item: ItemId },
-    EnemyEncounter { enemy: EntityId },
+    EnemyEncounter { enemies: Vec<EntityId>, primary_enemy: EntityId },
     DoorBlocked { pos: Pos },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingPrompt {
     id: ChoicePromptId,
     kind: PendingPromptKind,
@@ -82,6 +82,30 @@ impl Game {
         let enemy_b_id = actors.insert(enemy_b);
         actors[enemy_b_id].id = enemy_b_id;
 
+        let enemy_c = Actor {
+            id: EntityId::default(),
+            kind: ActorKind::Goblin,
+            pos: Pos { y: 6, x: 10 },
+            hp: 10,
+            max_hp: 10,
+            next_action_tick: 12,
+            speed: 12,
+        };
+        let enemy_c_id = actors.insert(enemy_c);
+        actors[enemy_c_id].id = enemy_c_id;
+
+        let enemy_d = Actor {
+            id: EntityId::default(),
+            kind: ActorKind::Goblin,
+            pos: Pos { y: 7, x: 9 },
+            hp: 10,
+            max_hp: 10,
+            next_action_tick: 12,
+            speed: 12,
+        };
+        let enemy_d_id = actors.insert(enemy_d);
+        actors[enemy_d_id].id = enemy_d_id;
+
         let mut map = Map::new(20, 15);
 
         for y in 1..(map.internal_height - 1) {
@@ -144,7 +168,7 @@ impl Game {
 
     pub fn advance(&mut self, max_steps: u32) -> AdvanceResult {
         let mut steps = 0;
-        if let Some(prompt) = self.pending_prompt {
+        if let Some(prompt) = self.pending_prompt.clone() {
             return AdvanceResult {
                 simulated_ticks: 0,
                 stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
@@ -161,9 +185,11 @@ impl Game {
             }
 
             let player_pos = self.state.actors[self.state.player_id].pos;
-            if let Some((enemy_id, _)) = self.find_adjacent_enemy(player_pos) {
-                self.log.push(LogEvent::EnemyEncountered { enemy: enemy_id });
-                return self.interrupt_enemy(enemy_id, steps);
+            self.clear_stale_suppressed_enemy(player_pos);
+            let adjacent = self.find_adjacent_enemy_ids(player_pos);
+            if let Some(primary_enemy) = adjacent.first().copied() {
+                self.log.push(LogEvent::EnemyEncountered { enemy: primary_enemy });
+                return self.interrupt_enemy(adjacent, primary_enemy, steps);
             }
             if let Some(item_id) = self.find_item_at(player_pos) {
                 return self.interrupt_loot(item_id, steps);
@@ -230,7 +256,7 @@ impl Game {
         prompt_id: ChoicePromptId,
         choice: Choice,
     ) -> Result<(), GameError> {
-        let Some(prompt) = self.pending_prompt else {
+        let Some(prompt) = self.pending_prompt.clone() else {
             return Err(GameError::PromptMismatch);
         };
         if prompt.id != prompt_id {
@@ -245,12 +271,12 @@ impl Game {
                 self.state.items.remove(item);
                 true
             }
-            (PendingPromptKind::EnemyEncounter { enemy }, Choice::Fight) => {
-                self.state.actors.remove(enemy);
+            (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Fight) => {
+                self.state.actors.remove(primary_enemy);
                 true
             }
-            (PendingPromptKind::EnemyEncounter { enemy }, Choice::Avoid) => {
-                self.suppressed_enemy = Some(enemy);
+            (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Avoid) => {
+                self.suppressed_enemy = Some(primary_enemy);
                 true
             }
             (PendingPromptKind::DoorBlocked { pos }, Choice::OpenDoor) => {
@@ -309,18 +335,23 @@ impl Game {
             id: ChoicePromptId(self.next_input_seq),
             kind: PendingPromptKind::Loot { item },
         };
-        self.pending_prompt = Some(prompt);
+        self.pending_prompt = Some(prompt.clone());
         AdvanceResult {
             simulated_ticks: steps,
             stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
         }
     }
-    fn interrupt_enemy(&mut self, enemy: EntityId, steps: u32) -> AdvanceResult {
+    fn interrupt_enemy(
+        &mut self,
+        enemies: Vec<EntityId>,
+        primary_enemy: EntityId,
+        steps: u32,
+    ) -> AdvanceResult {
         let prompt = PendingPrompt {
             id: ChoicePromptId(self.next_input_seq),
-            kind: PendingPromptKind::EnemyEncounter { enemy },
+            kind: PendingPromptKind::EnemyEncounter { enemies, primary_enemy },
         };
-        self.pending_prompt = Some(prompt);
+        self.pending_prompt = Some(prompt.clone());
         AdvanceResult {
             simulated_ticks: steps,
             stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
@@ -331,7 +362,7 @@ impl Game {
             id: ChoicePromptId(self.next_input_seq),
             kind: PendingPromptKind::DoorBlocked { pos },
         };
-        self.pending_prompt = Some(prompt);
+        self.pending_prompt = Some(prompt.clone());
         AdvanceResult {
             simulated_ticks: steps,
             stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
@@ -340,8 +371,8 @@ impl Game {
     fn prompt_to_interrupt(&self, prompt: PendingPrompt) -> Interrupt {
         match prompt.kind {
             PendingPromptKind::Loot { item } => Interrupt::LootFound { prompt_id: prompt.id, item },
-            PendingPromptKind::EnemyEncounter { enemy } => {
-                Interrupt::EnemyEncounter { prompt_id: prompt.id, enemy }
+            PendingPromptKind::EnemyEncounter { enemies, primary_enemy } => {
+                Interrupt::EnemyEncounter { prompt_id: prompt.id, enemies, primary_enemy }
             }
             PendingPromptKind::DoorBlocked { pos } => {
                 Interrupt::DoorBlocked { prompt_id: prompt.id, pos }
@@ -351,12 +382,36 @@ impl Game {
     fn find_item_at(&self, pos: Pos) -> Option<ItemId> {
         self.state.items.iter().find(|(_, item)| item.pos == pos).map(|(id, _)| id)
     }
-    fn find_adjacent_enemy(&self, pos: Pos) -> Option<(EntityId, &Actor)> {
-        self.state
+    fn find_adjacent_enemy_ids(&self, pos: Pos) -> Vec<EntityId> {
+        let mut enemies: Vec<EntityId> = self
+            .state
             .actors
             .iter()
-            .filter(|(id, _)| Some(*id) != self.suppressed_enemy && *id != self.state.player_id)
-            .find(|(_, a)| manhattan(pos, a.pos) == 1)
+            .filter(|(id, actor)| {
+                Some(*id) != self.suppressed_enemy
+                    && *id != self.state.player_id
+                    && manhattan(pos, actor.pos) == 1
+            })
+            .map(|(id, _)| id)
+            .collect();
+        enemies.sort_by_key(|id| {
+            let actor = &self.state.actors[*id];
+            (manhattan(pos, actor.pos), actor.pos.y, actor.pos.x, actor.kind)
+        });
+        enemies
+    }
+
+    fn clear_stale_suppressed_enemy(&mut self, player_pos: Pos) {
+        let Some(enemy_id) = self.suppressed_enemy else {
+            return;
+        };
+        let should_clear = match self.state.actors.get(enemy_id) {
+            Some(actor) => manhattan(player_pos, actor.pos) != 1,
+            None => true,
+        };
+        if should_clear {
+            self.suppressed_enemy = None;
+        }
     }
 }
 
@@ -767,6 +822,21 @@ mod tests {
         (map, Pos { y: 5, x: 6 })
     }
 
+    fn add_goblin(game: &mut Game, pos: Pos) -> EntityId {
+        let enemy = Actor {
+            id: EntityId::default(),
+            kind: ActorKind::Goblin,
+            pos,
+            hp: 10,
+            max_hp: 10,
+            next_action_tick: 12,
+            speed: 12,
+        };
+        let id = game.state.actors.insert(enemy);
+        game.state.actors[id].id = id;
+        id
+    }
+
     #[test]
     fn starter_layout_has_expected_rooms_door_hazards_and_spawns() {
         let game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
@@ -785,8 +855,10 @@ mod tests {
             .filter(|(id, actor)| *id != game.state.player_id && actor.kind == ActorKind::Goblin)
             .map(|(_, actor)| actor.pos)
             .collect();
-        assert_eq!(goblin_positions.len(), 2, "starter layout should spawn two goblins");
+        assert_eq!(goblin_positions.len(), 4, "starter layout should spawn four goblins");
         assert!(goblin_positions.contains(&Pos { y: 5, x: 11 }));
+        assert!(goblin_positions.contains(&Pos { y: 6, x: 10 }));
+        assert!(goblin_positions.contains(&Pos { y: 7, x: 9 }));
         assert!(goblin_positions.contains(&Pos { y: 11, x: 11 }));
 
         assert_eq!(game.state.map.tile_at(Pos { y: 5, x: 8 }), TileKind::ClosedDoor);
@@ -797,6 +869,46 @@ mod tests {
         for hazard in [Pos { y: 8, x: 11 }, Pos { y: 9, x: 11 }, Pos { y: 10, x: 11 }] {
             assert!(game.state.map.is_hazard(hazard), "expected hazard at {hazard:?}");
         }
+    }
+
+    #[test]
+    fn starter_layout_auto_flow_reaches_a_multi_enemy_encounter() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        let mut saw_multi_enemy_interrupt = false;
+        let mut encounter_sizes: Vec<(u64, Pos, usize)> = Vec::new();
+
+        while game.current_tick() <= 250 && !saw_multi_enemy_interrupt {
+            match game.advance(1).stop_reason {
+                AdvanceStopReason::Interrupted(Interrupt::LootFound { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::KeepLoot)
+                        .expect("loot choice should apply");
+                }
+                AdvanceStopReason::Interrupted(Interrupt::DoorBlocked { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::OpenDoor)
+                        .expect("door choice should apply");
+                }
+                AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                    prompt_id,
+                    enemies,
+                    ..
+                }) => {
+                    let player_pos = game.state.actors[game.state.player_id].pos;
+                    encounter_sizes.push((game.current_tick(), player_pos, enemies.len()));
+                    if enemies.len() >= 2 {
+                        saw_multi_enemy_interrupt = true;
+                    }
+                    game.apply_choice(prompt_id, Choice::Fight).expect("fight choice should apply");
+                }
+                AdvanceStopReason::Finished(_) => break,
+                AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {
+                }
+            }
+        }
+
+        assert!(
+            saw_multi_enemy_interrupt,
+            "expected at least one multi-enemy encounter interrupt in starter layout auto-flow; encounters={encounter_sizes:?}"
+        );
     }
 
     #[test]
@@ -1252,6 +1364,135 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn multi_enemy_interrupt_orders_enemies_and_sets_primary() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let player = game.state.actors[game.state.player_id].pos;
+        // Distance is identical, so ordering falls back to y then x.
+        let second = add_goblin(&mut game, Pos { y: player.y + 1, x: player.x });
+        let first = add_goblin(&mut game, Pos { y: player.y, x: player.x + 1 });
+
+        let result = game.advance(1);
+        assert_eq!(result.simulated_ticks, 0, "interrupt should occur before movement");
+        match result.stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                enemies,
+                primary_enemy,
+                ..
+            }) => {
+                assert_eq!(enemies, vec![first, second]);
+                assert_eq!(primary_enemy, first);
+            }
+            other => panic!("expected enemy encounter interrupt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn avoid_suppresses_only_primary_enemy_and_still_interrupts_on_other_enemy() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let player = game.state.actors[game.state.player_id].pos;
+        let second = add_goblin(&mut game, Pos { y: player.y + 1, x: player.x });
+        let first = add_goblin(&mut game, Pos { y: player.y, x: player.x + 1 });
+
+        let first_prompt = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                prompt_id,
+                primary_enemy,
+                ..
+            }) => {
+                assert_eq!(primary_enemy, first);
+                prompt_id
+            }
+            other => panic!("expected first enemy encounter, got {other:?}"),
+        };
+        game.apply_choice(first_prompt, Choice::Avoid).expect("avoid should apply");
+
+        match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                primary_enemy,
+                enemies,
+                ..
+            }) => {
+                assert_eq!(primary_enemy, second, "second enemy should now be primary");
+                assert_eq!(enemies, vec![second], "suppressed enemy should be omitted");
+            }
+            other => panic!("expected second enemy encounter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fighting_primary_enemy_leaves_other_enemy_to_interrupt_next_tick() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let player = game.state.actors[game.state.player_id].pos;
+        let second = add_goblin(&mut game, Pos { y: player.y + 1, x: player.x });
+        let first = add_goblin(&mut game, Pos { y: player.y, x: player.x + 1 });
+
+        let first_prompt = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                prompt_id,
+                primary_enemy,
+                ..
+            }) => {
+                assert_eq!(primary_enemy, first);
+                prompt_id
+            }
+            other => panic!("expected first enemy encounter, got {other:?}"),
+        };
+        game.apply_choice(first_prompt, Choice::Fight).expect("fight should apply");
+        assert!(!game.state.actors.contains_key(first), "primary enemy should be removed");
+        assert!(game.state.actors.contains_key(second), "other enemy should remain");
+
+        match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                primary_enemy,
+                enemies,
+                ..
+            }) => {
+                assert_eq!(primary_enemy, second);
+                assert_eq!(enemies, vec![second]);
+            }
+            other => panic!("expected follow-up enemy encounter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn suppressed_enemy_clears_after_it_is_no_longer_adjacent() {
+        let mut game = Game::new(12345, &ContentPack {}, GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let player = game.state.actors[game.state.player_id].pos;
+        let enemy = add_goblin(&mut game, Pos { y: player.y, x: player.x + 1 });
+
+        let prompt_id = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                prompt_id,
+                primary_enemy,
+                ..
+            }) => {
+                assert_eq!(primary_enemy, enemy);
+                prompt_id
+            }
+            other => panic!("expected enemy encounter, got {other:?}"),
+        };
+        game.apply_choice(prompt_id, Choice::Avoid).expect("avoid should apply");
+        assert_eq!(game.suppressed_enemy, Some(enemy));
+
+        // Move away so the suppressed enemy is no longer adjacent, then advance one tick.
+        game.state.actors[game.state.player_id].pos = Pos { y: player.y - 1, x: player.x - 1 };
+        let _ = game.advance(1);
+        assert_eq!(game.suppressed_enemy, None);
     }
 
     #[test]

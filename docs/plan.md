@@ -577,6 +577,7 @@ Execution guardrails for all Milestone 3 passes:
 - [x] Corridor B<->C floor tiles: `(x=11, y=8)` and `(x=11, y=9)`.
 - [x] Hazard lane tiles (all hazardous): `(x=11, y=8)`, `(x=11, y=9)`, `(x=11, y=10)`.
 - [x] Spawn at least two goblins for deterministic multi-enemy setup at fixed positions `(x=11, y=5)` and `(x=11, y=11)`.
+- [x] Ensure the default starter auto-flow can reach at least one true multi-enemy encounter (interrupt payload contains `enemies.len() >= 2`) without test-only actor injection.
 - [x] Add a starter-layout unit test that asserts door placement, hazard placement, and actor spawn coordinates exactly.
 - [x] Add an integration smoke test on fixed seed that confirms normal auto-run can hit both `DoorBlocked` interrupt and `AutoReason::ThreatAvoidance` within `<= 250` ticks.
 **Pass 3a Exit Criteria:**
@@ -585,14 +586,14 @@ Execution guardrails for all Milestone 3 passes:
 - **c) Architecture & Maintainability:** Starter layout is fully deterministic and locked by coordinate-based tests, so future combat/policy work can rely on a stable integration map.
 
 ### Milestone 3b — Multi-Enemy Encounter Interrupt Semantics (3–4 hrs)
-- [ ] Expand enemy encounter collection to support multiple hostiles in a single interrupt event.
-- [ ] Deterministic enemy ordering rule for encounter lists: sort by `(distance_to_player, pos.y, pos.x, actor_kind)`.
-- [ ] Define `primary_enemy` as index `0` from the sorted encounter list; `Fight`/`Avoid` applies to that enemy only.
-- [ ] Ensure first-sighting `EnemyEncounter` interrupt is emitted before opening combat actions or auto movement for that tick.
-- [ ] Keep `Avoid` suppression scoped to one enemy (`primary_enemy`) and clear suppression when that enemy is no longer adjacent or no longer exists.
-- [ ] Add unit test: two adjacent enemies produce a stable sorted encounter list and stable `primary_enemy`.
-- [ ] Add unit test: `Avoid` suppresses only the selected enemy and still allows interrupts from another adjacent enemy.
-- [ ] Add integration test: resolving one enemy in a multi-enemy encounter leaves remaining enemies active and interrupt-capable.
+- [x] Expand enemy encounter collection to support multiple hostiles in a single interrupt event.
+- [x] Deterministic enemy ordering rule for encounter lists: sort by `(distance_to_player, pos.y, pos.x, actor_kind)`.
+- [x] Define `primary_enemy` as index `0` from the sorted encounter list; `Fight`/`Avoid` applies to that enemy only.
+- [x] Ensure first-sighting `EnemyEncounter` interrupt is emitted before opening combat actions or auto movement for that tick.
+- [x] Keep `Avoid` suppression scoped to one enemy (`primary_enemy`) and clear suppression when that enemy is no longer adjacent or no longer exists.
+- [x] Add unit test: two adjacent enemies produce a stable sorted encounter list and stable `primary_enemy`.
+- [x] Add unit test: `Avoid` suppresses only the selected enemy and still allows interrupts from another adjacent enemy.
+- [x] Add integration test: resolving one enemy in a multi-enemy encounter leaves remaining enemies active and interrupt-capable.
 **Pass 3b Exit Criteria:**
 - **a) User Experience:** Multi-enemy contact is understandable and consistent: the player gets a clear encounter pause with deterministic enemy ordering and predictable follow-up behavior after `Fight` or `Avoid`.
 - **b) Progress toward vision:** Removes the hidden single-enemy assumption and establishes the minimum viable multi-hostile combat entry point needed for policy-driven encounters.

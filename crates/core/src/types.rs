@@ -47,7 +47,7 @@ pub enum RunOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Interrupt {
     LootFound { prompt_id: ChoicePromptId, item: ItemId },
-    EnemyEncounter { prompt_id: ChoicePromptId, enemy: EntityId },
+    EnemyEncounter { prompt_id: ChoicePromptId, enemies: Vec<EntityId>, primary_enemy: EntityId },
     DoorBlocked { prompt_id: ChoicePromptId, pos: Pos },
 }
 
