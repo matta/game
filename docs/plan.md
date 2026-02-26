@@ -664,14 +664,14 @@ Execution guardrails for all Milestone 4 passes:
 - [ ] Preserve DR-003 constraints throughout: strict one-way descent, no overworld selector, no ascending mechanics.
 
 ### Milestone 4a — Floor State + Deterministic Generator Contract (3–4 hrs)
-- [ ] Introduce explicit floor progression state in `core` with fixed MVP constants: `MAX_FLOORS = 3`, starting floor index `1`.
-- [ ] Add deterministic floor-generation API in `core` with full input contract: `(run_seed, floor_index, branch_profile) -> generated_floor`.
-- [ ] Define generated floor payload to include at minimum: map tiles, player entry tile, one down-stairs tile, enemy/item spawn placements.
-- [ ] Keep only one active floor state in memory at a time (prior floor state discarded on descent; no backtracking storage).
-- [ ] Enforce deterministic floor seed derivation from `(run_seed, floor_index, branch_profile)` using integer-only logic.
-- [ ] Add unit test: identical `(seed, floor, branch)` inputs produce byte-identical generated floor outputs.
-- [ ] Add unit test: changing `floor_index` changes generated floor output for fixed seed/branch.
-- [ ] Add unit test: generated floor always has a walkable route from entry tile to down-stairs tile.
+- [x] Introduce explicit floor progression state in `core` with fixed MVP constants: `MAX_FLOORS = 3`, starting floor index `1`.
+- [x] Add deterministic floor-generation API in `core` with full input contract: `(run_seed, floor_index, branch_profile) -> generated_floor`.
+- [x] Define generated floor payload to include at minimum: map tiles, player entry tile, one down-stairs tile, enemy/item spawn placements.
+- [x] Keep only one active floor state in memory at a time (prior floor state discarded on descent; no backtracking storage).
+- [x] Enforce deterministic floor seed derivation from `(run_seed, floor_index, branch_profile)` using integer-only logic.
+- [x] Add unit test: identical `(seed, floor, branch)` inputs produce byte-identical generated floor outputs.
+- [x] Add unit test: changing `floor_index` changes generated floor output for fixed seed/branch.
+- [x] Add unit test: generated floor always has a walkable route from entry tile to down-stairs tile.
 **Pass 4a Exit Criteria:**
 - **a) User Experience:** None directly yet; floor transitions may still be single-floor in runtime behavior, but generation primitives are in place.
 - **b) Progress toward vision:** Establishes concrete multi-floor infrastructure instead of a single static map.

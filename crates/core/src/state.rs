@@ -1,5 +1,6 @@
 use slotmap::SlotMap;
 
+use crate::floor::BranchProfile;
 use crate::types::*;
 
 #[derive(Clone, Debug)]
@@ -151,6 +152,8 @@ pub struct GameState {
     pub actors: SlotMap<EntityId, Actor>,
     pub items: SlotMap<ItemId, Item>,
     pub player_id: EntityId,
+    pub floor_index: u8,
+    pub branch_profile: BranchProfile,
     pub auto_intent: Option<AutoExploreIntent>,
     pub policy: Policy,
     pub threat_trace: std::collections::VecDeque<ThreatTrace>,

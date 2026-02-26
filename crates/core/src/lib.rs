@@ -1,3 +1,4 @@
+pub mod floor;
 pub mod game;
 pub mod journal;
 pub mod replay;
@@ -10,5 +11,6 @@ pub use replay::*;
 pub mod content;
 
 pub use content::ContentPack;
+pub use floor::{BranchProfile, GeneratedFloor, MAX_FLOORS, STARTING_FLOOR_INDEX, generate_floor};
 pub use state::{GameState, Map};
 pub use types::*;

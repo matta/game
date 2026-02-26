@@ -4,6 +4,7 @@ use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
 
 use crate::content::ContentPack;
+use crate::floor::{BranchProfile, STARTING_FLOOR_INDEX};
 use crate::state::{Actor, GameState, Item, Map};
 use crate::types::*;
 
@@ -188,6 +189,8 @@ impl Game {
                 actors,
                 items,
                 player_id,
+                floor_index: STARTING_FLOOR_INDEX,
+                branch_profile: BranchProfile::Uncommitted,
                 auto_intent: None,
                 policy: Policy::default(),
                 threat_trace: std::collections::VecDeque::new(),
@@ -435,6 +438,12 @@ impl Game {
         hasher.write_u64(self.seed);
         hasher.write_u64(self.tick);
         hasher.write_u64(self.next_input_seq);
+        hasher.write_u8(self.state.floor_index);
+        hasher.write_u8(match self.state.branch_profile {
+            BranchProfile::Uncommitted => 0,
+            BranchProfile::BranchA => 1,
+            BranchProfile::BranchB => 2,
+        });
         let player = &self.state.actors[self.state.player_id];
         hasher.write_i32(player.pos.x);
         hasher.write_i32(player.pos.y);
@@ -1025,6 +1034,8 @@ mod tests {
     #[test]
     fn starter_layout_has_expected_rooms_door_hazards_and_spawns() {
         let game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
+        assert_eq!(game.state.floor_index, STARTING_FLOOR_INDEX);
+        assert_eq!(game.state.branch_profile, BranchProfile::Uncommitted);
 
         let expected_player = Pos { y: 5, x: 4 };
         assert_eq!(game.state.actors[game.state.player_id].pos, expected_player);
