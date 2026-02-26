@@ -524,11 +524,31 @@ async fn main() {
 - **c) Architecture & Maintainability:** Pathing and frontier selection are decoupled from UI frames. The `AutoExploreIntent` logging mechanism ensures complex AI decisions can be analyzed and logged without console spam.
 
 ## Milestone 2b — FOV & Exploration Intelligence (6–8 hrs)
-- [ ] Implement minimum viable deterministic FOV in `core` (simple shadowcasting or equivalent simple method).
-- [ ] Improve frontier selection using visible frontier only.
-- [ ] Implement danger scoring v0: avoid known hazard tiles only.
-- [ ] Treat closed doors as walls until explicitly opened through an interrupt (no full door simulation in 2b).
-- [ ] Expand `AutoReason` usage for FOV/hazard-driven decisions.
+- [ ] Add test fixtures for FOV cases: open room, wall occlusion, hazard lane, and closed-door choke.
+- [ ] Add map visibility helpers (`clear_visible`, `set_visible`, `is_visible`) and bounds tests.
+- [ ] Add unit test: deterministic FOV in an open room returns the expected visible tile set.
+- [ ] Add unit test: wall occlusion blocks visibility behind the wall.
+- [ ] Add unit test: running FOV twice on identical state yields identical visible results.
+- [ ] Implement deterministic FOV pass in `core` using a fixed traversal order and integer math only.
+- [ ] Recompute visible tiles at run start and after each player movement tick.
+- [ ] Promote currently visible tiles to `discovered` while preserving prior discoveries.
+- [ ] Add integration test: moving one tile updates visibility and expands discovery deterministically.
+- [ ] Add unit test: frontier selection ignores frontier tiles outside current visibility.
+- [ ] Update frontier candidate filter to require visibility (visible frontier only).
+- [ ] Keep deterministic tie-breaks for visible frontier selection (`path_len`, then `y`, then `x`).
+- [ ] Add hazard metadata for tiles in `core` map fixtures/content hooks (known hazard = discovered hazardous tile).
+- [ ] Add unit test: planner picks a non-hazard path when a safe visible alternative exists.
+- [ ] Add unit test: planner returns no safe frontier intent when all visible options require known hazards.
+- [ ] Implement danger scoring v0 by excluding known hazard tiles from auto-explore path candidates.
+- [ ] Add `TileKind::ClosedDoor` (or equivalent closed-door marker) to map semantics.
+- [ ] Add unit test: closed doors are treated as non-walkable for FOV frontier pathing.
+- [ ] Add interrupt emission when a closed door blocks the chosen auto path segment.
+- [ ] Add minimal interrupt resolution for doors: open door tile and resume (no advanced door simulation).
+- [ ] Add integration test: closed-door interrupt -> open -> auto-explore resumes through the doorway.
+- [ ] Expand `AutoReason` variants for FOV/hazard/door-driven decisions.
+- [ ] Add unit test: `AutoReasonChanged` emits only when reason/target class changes under FOV/hazard/door scenarios.
+- [ ] Update app log text mappings for new `AutoReason` values.
+- [ ] Update app rendering so unknown tiles remain obscured and current visibility is reflected consistently.
 **Exit Criteria:**
 - **a) User Experience:** The map obscures unknown tiles, bringing a feeling of discovery. Movement looks intentional despite constrained vision. Hazards are avoided naturally.
 - **b) Progress toward vision:** Reinforces the "decisions matter" pillar (Vision 1.1). Managing incomplete information becomes part of the core fantasy.
