@@ -1,40 +1,84 @@
 use core::{AdvanceStopReason, ContentPack, Game, GameMode, TileKind};
 use macroquad::prelude::*;
 
+enum AppMode {
+    Paused,
+    AutoPlay,
+    PendingPrompt {
+        prompt_id: core::ChoicePromptId,
+        auto_play_suspended: bool,
+    },
+    Finished,
+}
+
 #[macroquad::main("Roguelike")]
 async fn main() {
     let content = ContentPack {};
     let mut game = Game::new(12345, &content, GameMode::Ironman);
 
-    let mut auto_play = false;
+    let mut mode = AppMode::Paused;
 
     loop {
         clear_background(BLACK);
 
+        let mut advance_result = None;
+
         // Input handling
-        if is_key_pressed(KeyCode::Space) {
-            auto_play = !auto_play;
-            if !auto_play {
-                game.request_pause();
+        match &mode {
+            AppMode::Paused | AppMode::AutoPlay => {
+                if is_key_pressed(KeyCode::Space) {
+                    mode = match mode {
+                        AppMode::Paused => AppMode::AutoPlay,
+                        AppMode::AutoPlay => {
+                            game.request_pause();
+                            AppMode::Paused
+                        }
+                        _ => mode,
+                    };
+                }
+
+                if is_key_pressed(KeyCode::Right) && matches!(mode, AppMode::Paused) {
+                    advance_result = Some(game.advance(1));
+                }
+            }
+            AppMode::PendingPrompt { prompt_id, auto_play_suspended } => {
+                let id = *prompt_id;
+                let resume = *auto_play_suspended;
+                
+                if is_key_pressed(KeyCode::L) {
+                    game.apply_choice(id, core::Choice::KeepLoot)
+                        .expect("Failed to apply pending choice");
+                        
+                    mode = if resume {
+                        AppMode::AutoPlay
+                    } else {
+                        AppMode::Paused
+                    };
+                }
+            }
+            AppMode::Finished => {
+                // No inputs valid after completion
             }
         }
 
-        if is_key_pressed(KeyCode::Right) && !auto_play {
-            game.advance(1);
+        // Logic stepping
+        if matches!(mode, AppMode::AutoPlay) {
+            advance_result = Some(game.advance(10)); // Batch step for synchronous iteration
         }
 
-        // Logic stepping
-        if auto_play {
-            let result = game.advance(10); // Batch step for synchronous iteration
+        if let Some(result) = advance_result {
             match result.stop_reason {
                 AdvanceStopReason::PausedAtBoundary { .. } => {
-                    auto_play = false;
+                    mode = AppMode::Paused;
                 }
-                AdvanceStopReason::Interrupted(_) => {
-                    auto_play = false;
+                AdvanceStopReason::Interrupted(core::Interrupt::LootFound(prompt_id)) => {
+                    mode = AppMode::PendingPrompt {
+                        prompt_id,
+                        auto_play_suspended: matches!(mode, AppMode::AutoPlay),
+                    };
                 }
                 AdvanceStopReason::Finished(_) => {
-                    auto_play = false;
+                    mode = AppMode::Finished;
                 }
                 AdvanceStopReason::BudgetExhausted => {
                     // Continuing auto play on next frame
@@ -79,10 +123,11 @@ async fn main() {
             );
         }
 
-        let status = if auto_play {
-            "Auto-Explore ON (Space to pause)"
-        } else {
-            "Paused (Space to Auto-Explore, Right to step)"
+        let status = match mode {
+            AppMode::PendingPrompt { .. } => "INTERRUPT: Loot Found! (Press 'L' to Keep & Resume)",
+            AppMode::Finished => "Finished (Victory!)",
+            AppMode::AutoPlay => "Auto-Explore ON (Space to pause)",
+            AppMode::Paused => "Paused (Space to Auto-Explore, Right to step)",
         };
         draw_text(status, 20.0, 30.0, 20.0, WHITE);
         draw_text(&format!("Tick: {}", game.current_tick()), 20.0, 400.0, 20.0, WHITE);
