@@ -477,9 +477,9 @@ async fn main() {
 - [x] Implement `RunState` and basic map structure (dense tile arrays).
 - [x] Implement `advance(...)` API (`AdvanceResult`, stop reasons) and prompt-bound `apply_choice`.
 - [x] Implement headless replay API in `core` (`replay_to_end(content, journal) -> ReplayResult`).
-- [ ] Add thin `tools/replay_runner` CLI wrapper that prints final `snapshot_hash`/outcome from a journal file.
-- [ ] Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
-- [ ] Implement single-clock auto loop (synchronous batch stepping) with pause-at-next-tick-boundary behavior.
+- [x] Add thin `tools/replay_runner` CLI wrapper that prints final `snapshot_hash`/outcome from a journal file.
+- [x] Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
+- [x] Implement single-clock auto loop (synchronous batch stepping) with pause-at-next-tick-boundary behavior.
 - [x] Implement Player + 1 enemy, turn engine, and fake loot interrupt.
 *Done when: repeated runs with the same seed/journal produce identical final snapshot hash via headless replay API.*
 

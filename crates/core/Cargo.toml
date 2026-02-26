@@ -7,3 +7,4 @@ edition.workspace = true
 rand_chacha = { workspace = true }
 slotmap = { workspace = true }
 xxhash-rust = { workspace = true }
+serde = { workspace = true }

@@ -1,6 +1,8 @@
 use crate::types::{Choice, ChoicePromptId};
 
-#[derive(Clone, Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InputJournal {
     pub format_version: u16,
     pub build_id: String,
@@ -9,13 +11,13 @@ pub struct InputJournal {
     pub inputs: Vec<InputRecord>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InputRecord {
     pub seq: u64,
     pub payload: InputPayload,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum InputPayload {
     Choice { prompt_id: ChoicePromptId, choice: Choice },
     // PolicyUpdate(...) would go here
