@@ -80,15 +80,30 @@ pub struct Game {
 Core API:
 
 ```rust
-pub enum StepOutcome {
+pub enum AdvanceStopReason {
   Interrupted(Interrupt),
-  AdvancedNoInterrupt { ticks: u32 },
+  PausedAtBoundary { tick: u64 },
   Finished(RunOutcome),
+  BudgetExhausted,
+}
+
+pub struct TickFrame {
+  pub tick: u64,
+  pub player_pos: Pos,
+  pub visible_actor_positions: Vec<(EntityId, Pos)>,
+  pub exploration_target: Option<Pos>,
+}
+
+pub struct AdvanceResult {
+  pub simulated_ticks: u32,
+  pub trace: Vec<TickFrame>, // deterministic order, ascending tick
+  pub stop_reason: AdvanceStopReason,
 }
 
 impl Game {
   pub fn new(seed: u64, content: &ContentPack, mode: GameMode) -> Self;
-  pub fn step_until_interrupt(&mut self, max_steps: u32) -> StepOutcome;
+  pub fn advance(&mut self, max_steps: u32, max_trace_frames: usize) -> AdvanceResult;
+  pub fn request_pause(&mut self);
   pub fn apply_choice(
     &mut self,
     prompt_id: ChoicePromptId,
@@ -96,15 +111,27 @@ impl Game {
   ) -> Result<(), GameError>;
   pub fn apply_policy_update(&mut self, update: PolicyUpdate) -> Result<(), GameError>;
   pub fn current_tick(&self) -> u64;
-  pub fn observation(&self) -> Observation;
+  pub fn observation(&self) -> ObservationRef<'_>;
+  pub fn observation_owned(&self) -> ObservationOwned; // tools/debug export path
   pub fn snapshot_hash(&self) -> u64;
 }
 ```
 
 Execution rule:
-- `app` auto mode calls `step_until_interrupt(1)` (one simulation tick per loop iteration).
-- This creates a deterministic pause opportunity between every tick.
-- User pause requests are honored at the next tick boundary.
+- MVP threading model is single-threaded: Macroquad app loop and `Game` simulation run on the same main thread.
+- `app` auto mode advances with batch stepping: `advance(max_steps, max_trace_frames)`.
+- `core` still advances one tick at a time internally and may return early on interrupt, finish, pending pause, or batch budget exhaustion.
+- `app` runs simulation and presentation on two clocks:
+  - Simulation clock: fill a trace queue using `advance(...)` up to a CPU time budget.
+  - Presentation clock: consume queued `TickFrame`s at a configurable visual speed (ticks/second).
+- Simulation can run far ahead of rendering, but auto-stepping stops filling when the trace queue reaches a configured high-water mark.
+- User pause requests are latched via `request_pause()` (called by the app after input polling on the same thread) and honored at the next tick boundary (`PausedAtBoundary`).
+
+Why this complexity is intentional:
+- A Rust `core` can simulate hundreds/thousands of ticks in one render frame; a naive loop would visually skip meaningful movement.
+- Players need controllable perceived speed (watchable motion, readable interrupts) without sacrificing fast simulation throughput.
+- The trace queue decouples simulation speed from presentation speed while preserving deterministic tick order.
+- `TickFrame` data is derived output, not an input source, so replay determinism still depends only on seed + input journal.
 
 ## 3.1 Input Journal Specification
 
@@ -152,17 +179,17 @@ MVP compatibility guarantee: journal replay is supported only when `build_id` an
 ## 3.2 Core / App Communication Contract
 
 - `app` provides **pure inputs**: `InputPayload`.
-- `core` returns **pure outputs**: `Interrupt`, `Observation`, `LogEvent`.
+- `core` returns **pure outputs**: `AdvanceResult` (`TickFrame` + `AdvanceStopReason`), `ObservationRef`, `LogEvent`.
 - `app` never reads or writes `core` internals except through the public API.
 
 The `app` crate controls the execution loop, deciding whether to auto-explore or wait for user input (e.g., when paused). The `core` only receives inputs that mutate simulation state, remaining entirely ignorant of UI concepts.
 
-`Observation` is strictly engine-agnostic state:
+`ObservationRef` is strictly engine-agnostic state and is returned as a borrow (no per-frame deep copy):
 
 ```rust
-pub struct Observation {
-  pub visible_tiles: Vec<TileObservation>,     // TileKind only; no glyph/color
-  pub visible_actors: Vec<ActorObservation>,   // logical entities in view
+pub struct ObservationRef<'a> {
+  pub visible_tiles: &'a [TileObservation],    // TileKind only; no glyph/color
+  pub visible_actors: &'a [ActorObservation],  // logical entities in view
   pub player: PlayerObservation,               // logical stats and statuses
   pub current_exploration_target: Option<Pos>, // why auto-explore is moving
 }
@@ -176,17 +203,27 @@ pub struct ActorObservation {
   pub id: EntityId,
   pub kind: ActorKind,
   pub pos: Pos,
-  pub status_tags: Vec<StatusTag>,
+  pub status_bits: StatusBits,
 }
 
 pub struct PlayerObservation {
   pub hp: i32,
   pub max_hp: i32,
-  pub statuses: Vec<StatusTag>,
+  pub status_bits: StatusBits,
+}
+
+pub struct ObservationOwned {
+  pub visible_tiles: Vec<TileObservation>,
+  pub visible_actors: Vec<ActorObservation>,
+  pub player: PlayerObservation,
+  pub current_exploration_target: Option<Pos>,
 }
 ```
 
-Explicitly excluded from `Observation`: glyphs, colors, fonts, panel layout, animation/motion cues, and any UI-specific formatting.
+Explicitly excluded from `ObservationRef`/`ObservationOwned`: glyphs, colors, fonts, panel layout, animation/motion cues, and any UI-specific formatting.
+Default render path should use `observation()` (`ObservationRef`) to avoid per-frame heap churn; `observation_owned()` is for tooling/debug paths where ownership is useful.
+
+`TickFrame` is also engine-agnostic (logical positions/targets only), and is used to pace presentation. Rendering style remains entirely in `app`.
 
 Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
 
@@ -194,12 +231,14 @@ This contract enables a headless `tools/replay_runner` that exercises `core` wit
 
 ## 3.3 Pause/Policy Timing Model
 
-- Auto-explore runs by repeatedly advancing one tick at a time.
-- After each tick, control returns to the app loop.
-- If the user requested pause, the app stops auto-advancement at that boundary.
+- Auto-explore runs by repeated batch stepping, while simulation logic remains tick-granular internally.
+- Each `advance(...)` call emits an ordered `TickFrame` trace that the app can play back at any visual speed.
+- `core` checks pending pause between internal ticks and exits on the next boundary.
+- Pause changes control flow only and does not mutate simulation state.
 - While paused, the user may issue one or more policy updates.
 - On resume, the next tick uses the latest accepted policy state.
 - Replay applies policy updates at the recorded boundary before simulating the next tick.
+- Interrupts/finish are surfaced as stop reasons; app shows related UI once visual playback has consumed all prior trace frames.
 
 ## 3.4 Easy Mode Checkpoint Model
 
@@ -302,6 +341,98 @@ Input:
 - Esc: menu
 - Number keys: interrupt choices
 - Tab: cycle policy presets
+- `[` / `]`: decrease/increase auto-explore visual speed (ticks/sec)
+
+## 7.1 Main Loop Sketch (Single Thread)
+
+```rust
+#[macroquad::main("Roguelike")]
+async fn main() {
+  let mut game = Game::new(seed, &content, mode);
+  let mut auto_enabled = true;
+  let mut visual_ticks_per_sec = 30.0_f32;
+  let mut visual_tick_accum = 0.0_f32;
+  // Buffer of deterministic per-tick facts for smooth playback when simulation outruns rendering.
+  let mut trace_queue: VecDeque<TickFrame> = VecDeque::new();
+  // Stop reasons are delayed until buffered frames are shown, so UI doesn't jump ahead of animation.
+  let mut pending_stop: Option<AdvanceStopReason> = None;
+  let mut presented = PresentedState::from_observation(game.observation());
+
+  loop {
+    let dt = get_frame_time();
+
+    // 1) Poll user input (Macroquad keyboard/mouse APIs)
+    if is_key_pressed(KeyCode::Space) { auto_enabled = !auto_enabled; }
+    if is_key_pressed(KeyCode::LeftBracket)  { visual_ticks_per_sec *= 0.8; }
+    if is_key_pressed(KeyCode::RightBracket) { visual_ticks_per_sec *= 1.25; }
+    if is_key_pressed(KeyCode::P) { game.request_pause(); }
+
+    if let Some(update) = poll_policy_update_from_ui() {
+      // Valid only while paused at a tick boundary.
+      if game.apply_policy_update(update).is_ok() {
+        journal_append_policy(update, game.current_tick());
+      }
+    }
+
+    if let Some((prompt_id, choice)) = poll_interrupt_choice_from_ui() {
+      if game.apply_choice(prompt_id, choice).is_ok() {
+        journal_append_choice(prompt_id, choice, game.current_tick());
+      }
+    }
+
+    // 2) Fill simulation trace queue (simulation clock)
+    if auto_enabled && pending_stop.is_none() && trace_queue.len() < TRACE_HIGH_WATER {
+      let frame_start = get_time();
+      while get_time() - frame_start < SIM_BUDGET_SECS && trace_queue.len() < TRACE_HIGH_WATER {
+        let batch = game.advance(MAX_STEPS_PER_CALL, TRACE_CHUNK_MAX);
+        trace_queue.extend(batch.trace);
+        match batch.stop_reason {
+          AdvanceStopReason::BudgetExhausted => {}
+          stop => {
+            pending_stop = Some(stop);
+            break;
+          }
+        }
+      }
+    }
+
+    // 3) Consume trace queue at configurable visual speed (presentation clock)
+    visual_tick_accum += dt * visual_ticks_per_sec;
+    while visual_tick_accum >= 1.0 && !trace_queue.is_empty() {
+      let tick_frame = trace_queue.pop_front().unwrap();
+      presented.apply_tick_frame(&tick_frame);
+      visual_tick_accum -= 1.0;
+    }
+
+    // 4) Only show interrupt/game-over after matching visual playback catches up
+    if trace_queue.is_empty() {
+      if let Some(stop) = pending_stop.take() {
+        match stop {
+          AdvanceStopReason::Interrupted(interrupt) => {
+            show_interrupt_ui(interrupt);
+            auto_enabled = false;
+          }
+          AdvanceStopReason::PausedAtBoundary { .. } => {
+            auto_enabled = false;
+          }
+          AdvanceStopReason::Finished(outcome) => {
+            show_game_over_ui(outcome);
+            auto_enabled = false;
+          }
+          AdvanceStopReason::BudgetExhausted => {}
+        }
+      } else {
+        // Keep presented state aligned when no buffered trace remains.
+        presented.sync_from_observation(game.observation());
+      }
+    }
+
+    // 5) Render
+    render_presented_state(&presented);
+    next_frame().await;
+  }
+}
+```
 
 ---
 
@@ -317,9 +448,9 @@ Input:
 ## Milestone 1 — CoreSim Skeleton & Initial UI (10–12 hrs)
 - Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
 - Implement `RunState` and basic map structure (dense tile arrays).
-- Implement `StepOutcome` API and prompt-bound `apply_choice`.
+- Implement `advance(...)` API (`AdvanceResult`, `TickFrame`, stop reasons) and prompt-bound `apply_choice`.
 - Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
-- Implement tick-granular auto loop (`step_until_interrupt(1)`) with pause-at-next-boundary behavior.
+- Implement two-clock auto loop (simulation fill + playback consume) with pause-at-next-tick-boundary behavior.
 - Implement Player + 1 enemy, turn engine, and fake loot interrupt.
 *Done when: repeated runs with the same seed produce identical interrupt sequence + snapshot hash.*
 
@@ -327,7 +458,7 @@ Input:
 - Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
 - Implement minimal frontier selection (nearest unknown-adjacent discovered tile).
 - Render ASCII map and display event log in `app`.
-- Implement the `step_until_interrupt()` API for auto-explore.
+- Implement trace-driven playback controls (visual ticks/sec) independent of simulation throughput.
 - Implement keep/discard and fight-vs-avoid interrupt panels using stable IDs.
 *Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and movement rationale is understandable.*
 
@@ -423,6 +554,7 @@ Rationale:
 - Golden replay files are expensive during rapid content iteration because expected outputs churn frequently.
 - Small, focused property tests catch broad logic bugs without coupling tests to unstable content details.
 - Determinism smoke tests and replay round-trip tests (including checkpoint restore equivalence) provide core confidence with low maintenance.
+- Add batching-equivalence tests (`N` single-tick advances vs one `advance(N, ..)`) to protect performance optimizations without risking behavior drift.
 
 ---
 
