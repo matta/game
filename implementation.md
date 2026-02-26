@@ -33,13 +33,12 @@ Deferred post-MVP:
 
 # 2. Workspace Architecture
 
-Cargo workspace layout utilizes four distinct crates to enforce strict separation of concerns and protect the deterministic core simulation:
+Cargo workspace layout utilizes three distinct crates to enforce strict separation of concerns and protect the deterministic core simulation:
 
 ```text
 /Cargo.toml
 crates/
-  core/      # Deterministic simulation engine (Logic only, no OS/Render)
-  content/   # Data definitions (Items, Perks, Gods) + validation
+  core/      # Deterministic simulation engine + Hardcoded Content
   app/       # Macroquad frontend (UI shell and input translation)
   tools/     # Optional balance/replay tools
 ```
@@ -47,7 +46,7 @@ crates/
 ## 2.1 Memory Management Strategy
 The `core` crate uses Generational Arenas (`slotmap`) for **actor** storage (player + monsters) and **item instance** storage (stable `ItemId`). This avoids borrow checker conflicts and prevents use-after-free errors when entities are created and destroyed during simulation, without resorting to complex ECS frameworks.
 
-Map tiles remain dense arrays/structs; each tile stores stable IDs/flags rather than positional indices for player-facing references. Static content definitions (item/perk/god blueprints) remain dense arrays in `content`.
+Map tiles remain dense arrays/structs; each tile stores stable IDs/flags rather than positional indices for player-facing references. Static content definitions (item/perk/god blueprints) remain dense arrays in `core::content`.
 
 ---
 
@@ -468,7 +467,7 @@ async fn main() {
 # 8. Milestone Roadmap
 
 ## Milestone 0 — Workspace Setup (3–5 hrs)
-- Create 4-crate workspace (`core`, `content`, `app`, `tools`).
+- Create 3-crate workspace (`core`, `app`, `tools`).
 - Add rustfmt + clippy.
 - Basic CI (test + lint).
 - README.
@@ -522,7 +521,7 @@ Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) d
 *Done when: route choice matters.*
 
 ## Milestone 5 — Content Pass (15–18 hrs)
-- Populate `content` crate: ~15 items, ~10 perks, 2 gods.
+- Populate `core::content`: ~15 items, ~10 perks, 2 gods.
 - 6–8 enemy types, 1 boss.
 - 3–5 vault templates.
 *Done when: 3+ viable archetypes exist.*
@@ -640,3 +639,21 @@ Rationale:
 **Context:** Need a way to explain auto-explore decisions to the player so deaths don't feel "unfair", but without spamming the UI with continuous pathing updates.
 **Decision:** Auto-explore acts as a planner emitting chunky `AutoSegmentStarted` log events only when deciding on a new target or objective. The UI hides this trace by default but allows the player to inspect the recent planner history on demand via a dedicated panel.
 **Rationale:** Fully black-boxing auto-explore makes policy tuning feel random. But logging every step creates unreadable noise. A segmented trace (logging the "intent" of the next N steps) satisfies the need for "why did it do that?" debuggability while remaining lightweight to implement and out of the player's way during normal play.
+
+## DR-008: Merging Content and Core for Rapid MVP Development
+**Context:** The initial plan proposed a distinct `content` crate to cleanly separate pure data schemas (Items, Perks) from the `core` simulation engine.
+**Decision:** The `content` crate was dropped and its responsibilities merged into a `core::content` module. Data specifications are allowed to contain hardcoded engine logic directly rather than relying on a pure, data-driven enum schema.
+**Rationale:** Maintaining a separate `content` crate forces the developer to build a rigid, generic data-driven architecture (e.g. `enum ItemEffect { DealDamage, ApplyStatus }`) to avoid circular Cargo dependencies. During an MVP, this is a time sink. By merging them, we accept the technical debt of mixing data definitions with engine logic. For example:
+```rust
+pub fn sword_of_healing() -> ItemDef {
+    ItemDef {
+        name: "Sword of Healing",
+        on_hit: |game, target, attacker| {
+            // Debt accepted: Direct engine mutation mixed into item definition!
+            attacker.heal(5);
+            target.take_damage(10);
+        }
+    }
+}
+```
+This is a calculated risk. It borders on "OOP morass" where entities own their own logic, breaking strict data/logic separation. However, given the tiny MVP scope (~15 items, ~10 perks), the velocity gained by avoiding a complex data schema engine far outweighs the structural impurity. If the game succeeds and scaling to 200+ items is required, this debt must be paid down by extracting a pure data schema.
