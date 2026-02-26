@@ -7,6 +7,7 @@ pub enum AppMode {
     Paused,
     AutoPlay,
     PendingPrompt {
+        interrupt: Interrupt,
         prompt_id: ChoicePromptId,
         auto_play_suspended: bool,
     },
@@ -47,15 +48,32 @@ impl AppState {
                     advance_result = Some(game.advance(1));
                 }
             }
-            AppMode::PendingPrompt { prompt_id, auto_play_suspended } => {
+            AppMode::PendingPrompt { prompt_id, auto_play_suspended, interrupt } => {
                 let id = *prompt_id;
                 let resume = *auto_play_suspended;
-
-                if keys_pressed.contains(&KeyCode::L) {
-                    game.apply_choice(id, core::Choice::KeepLoot)
-                        .expect("Failed to apply pending choice");
-
-                    self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                match interrupt {
+                    Interrupt::LootFound { .. } => {
+                        if keys_pressed.contains(&KeyCode::L) {
+                            game.apply_choice(id, core::Choice::KeepLoot)
+                                .expect("Failed to apply pending choice");
+                            self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                        } else if keys_pressed.contains(&KeyCode::D) {
+                            game.apply_choice(id, core::Choice::DiscardLoot)
+                                .expect("Failed to apply pending choice");
+                            self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                        }
+                    }
+                    Interrupt::EnemyEncounter { .. } => {
+                        if keys_pressed.contains(&KeyCode::F) {
+                            game.apply_choice(id, core::Choice::Fight)
+                                .expect("Failed to apply pending choice");
+                            self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                        } else if keys_pressed.contains(&KeyCode::A) {
+                            game.apply_choice(id, core::Choice::Avoid)
+                                .expect("Failed to apply pending choice");
+                            self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                        }
+                    }
                 }
             }
             AppMode::Finished => {
@@ -73,8 +91,13 @@ impl AppState {
                 AdvanceStopReason::PausedAtBoundary { .. } => {
                     self.mode = AppMode::Paused;
                 }
-                AdvanceStopReason::Interrupted(Interrupt::LootFound(prompt_id)) => {
+                AdvanceStopReason::Interrupted(interrupt) => {
+                    let prompt_id = match interrupt {
+                        Interrupt::LootFound { prompt_id, .. } => prompt_id,
+                        Interrupt::EnemyEncounter { prompt_id, .. } => prompt_id,
+                    };
                     self.mode = AppMode::PendingPrompt {
+                        interrupt,
                         prompt_id,
                         auto_play_suspended: matches!(self.mode, AppMode::AutoPlay),
                     };

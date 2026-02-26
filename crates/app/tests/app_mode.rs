@@ -1,5 +1,5 @@
 use app::app_loop::{AppMode, AppState};
-use core::{ContentPack, Game, GameMode};
+use core::{ContentPack, Game, GameMode, Interrupt};
 use macroquad::prelude::KeyCode;
 
 #[test]
@@ -28,7 +28,11 @@ fn test_autoplay_sets_suspended_state() {
 
     // Start auto-play
     app.tick(&mut game, &[KeyCode::Space]);
-    assert_eq!(app.mode, AppMode::AutoPlay);
+    match app.mode {
+        AppMode::AutoPlay => {}
+        AppMode::PendingPrompt { auto_play_suspended, .. } => assert!(auto_play_suspended),
+        _ => panic!("Expected autoplay or pending prompt immediately after enabling autoplay"),
+    }
 
     // Let it run. It should hit loot eventually.
     for _ in 0..100 {
@@ -39,4 +43,26 @@ fn test_autoplay_sets_suspended_state() {
         }
     }
     panic!("Did not encounter pending prompt during autoplay");
+}
+
+#[test]
+fn test_auto_explore_interrupt_choice_and_resume_loop() {
+    let content = ContentPack {};
+    let mut game = Game::new(12345, &content, GameMode::Ironman);
+    let mut app = AppState::new();
+
+    app.tick(&mut game, &[KeyCode::Space]);
+
+    if let AppMode::PendingPrompt { interrupt, .. } = &app.mode {
+        let key = match interrupt {
+            Interrupt::LootFound { .. } => KeyCode::L,
+            Interrupt::EnemyEncounter { .. } => KeyCode::F,
+        };
+        app.tick(&mut game, &[key]);
+    }
+
+    assert!(
+        matches!(app.mode, AppMode::AutoPlay | AppMode::PendingPrompt { .. }),
+        "app should continue the loop after resolving a prompt"
+    );
 }

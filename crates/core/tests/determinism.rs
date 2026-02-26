@@ -1,6 +1,7 @@
 use core::journal::InputJournal;
 use core::replay::replay_to_end;
 use core::state::ContentPack;
+use core::{AdvanceStopReason, Choice, Game, GameMode, Interrupt};
 
 #[test]
 fn test_determinism_identical_seeds_produce_same_hash() {
@@ -39,4 +40,43 @@ fn test_determinism_different_seeds_produce_different_hashes() {
         result1.final_snapshot_hash, result2.final_snapshot_hash,
         "Different seeds should probably produce different outcomes or hashes"
     );
+}
+
+#[test]
+fn test_deterministic_smoke_fixed_seed_stable_intent_and_log_sequence() {
+    let content = ContentPack {};
+
+    fn run_trace(seed: u64, content: &ContentPack) -> Vec<String> {
+        let mut game = Game::new(seed, content, GameMode::Ironman);
+        let mut trace = Vec::new();
+        let mut seen_logs = 0usize;
+
+        while game.current_tick() < 40 {
+            let result = game.advance(1);
+            match result.stop_reason {
+                AdvanceStopReason::Interrupted(Interrupt::LootFound { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::KeepLoot)
+                        .expect("loot choice should apply");
+                    trace.push("loot".to_string());
+                }
+                AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::Fight).expect("fight choice should apply");
+                    trace.push("fight".to_string());
+                }
+                _ => {}
+            }
+
+            let logs = game.log();
+            for event in &logs[seen_logs..] {
+                trace.push(format!("{event:?}"));
+            }
+            seen_logs = logs.len();
+        }
+
+        trace
+    }
+
+    let left = run_trace(12345, &content);
+    let right = run_trace(12345, &content);
+    assert_eq!(left, right, "same seed should produce the same intent/log trace");
 }

@@ -32,6 +32,8 @@ pub struct ChoicePromptId(pub u64);
 pub enum Choice {
     KeepLoot,
     DiscardLoot,
+    Fight,
+    Avoid,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,9 +42,10 @@ pub enum RunOutcome {
     Defeat,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Interrupt {
-    LootFound(ChoicePromptId),
+    LootFound { prompt_id: ChoicePromptId, item: ItemId },
+    EnemyEncounter { prompt_id: ChoicePromptId, enemy: EntityId },
 }
 
 #[derive(Clone, Debug)]
@@ -67,16 +70,26 @@ pub enum GameError {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LogEvent {
-    AutoSegmentStarted { reason: AutoReason, target: Pos, planned_len: u16 },
+    AutoReasonChanged { reason: AutoReason, target: Pos, path_len: u16 },
     EnemyEncountered { enemy: EntityId },
     ItemPickedUp,
+    ItemDiscarded,
+    EncounterResolved { enemy: EntityId, fought: bool },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoReason {
     Frontier,
     Loot,
     ThreatAvoidance,
+    Stuck,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AutoExploreIntent {
+    pub target: Pos,
+    pub reason: AutoReason,
+    pub path_len: u16,
 }
 
 pub enum GameMode {
