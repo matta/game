@@ -267,8 +267,31 @@ Default render path should use `observation()` (`ObservationRef`) to avoid per-f
 Emission rule: emit on `(target, reason)` transition; do not spam events for per-tick `path_len` shrink while following the same intent.
 
 Policy updates in MVP are applied only at tick boundaries while paused (from interrupt or user pause), and every accepted update is journaled with its `tick_boundary`.
+Action-cost requirement: automatic loadout swaps are in-world actions that consume ticks; no free pre-combat equipment changes.
+MVP policy timing split:
+- Loadout-affecting updates (equip/swap) consume time via `SwapLoadout` action(s).
+- Non-loadout policy knob edits (priority/stance/thresholds) are applied at pause boundaries without direct tick cost.
 
 This contract enables a headless `tools/replay_runner` that exercises `core` without any rendering dependency.
+
+Replay execution surface (MVP):
+
+```rust
+pub struct ReplayResult {
+  pub final_outcome: RunOutcome,
+  pub final_snapshot_hash: u64,
+  pub final_tick: u64,
+}
+
+pub fn replay_to_end(
+  content: &ContentPack,
+  journal: &InputJournal
+) -> Result<ReplayResult, ReplayError>;
+```
+
+- Primary contract is the Rust API in `core` (`replay_to_end`) used by tests/CI.
+- `tools/replay_runner` is a thin CLI wrapper around that API for manual verification and debugging.
+- CLI minimum behavior: load journal, run replay headlessly, print final `snapshot_hash` and outcome.
 
 ## 3.3 Pause/Policy Timing Model
 
@@ -276,6 +299,8 @@ This contract enables a headless `tools/replay_runner` that exercises `core` wit
 - Each `advance(...)` call emits an ordered `TickFrame` trace that the app can play back at any visual speed.
 - `core` checks pending pause between internal ticks and exits on the next boundary.
 - Pause changes control flow only and does not mutate simulation state.
+- When a hostile is first seen in FOV during auto-explore, `core` emits `EnemyEncounter` before committing opening combat actions.
+- Auto-explore halts at that interrupt so the player can inspect threat summary and adjust policy/loadout.
 - While paused, the user may issue one or more policy updates.
 - On resume, the next tick uses the latest accepted policy state.
 - Replay applies policy updates at the recorded boundary before simulating the next tick.
@@ -318,10 +343,16 @@ pub struct Policy {
   pub target_priority: Vec<TargetTag>,
   pub consume_hp_threshold: u8,
   pub retreat_hp_threshold: u8,
-  pub position_intent: PositionIntent,
+  pub position_intent: PositionIntent, // MVP-restricted intent set
   pub resource_aggression: Aggro,
   pub exploration_mode: ExploreMode,
-  pub loadout_rule: LoadoutRule, // pre-combat swap intent
+  pub loadout_rule: LoadoutRule, // may trigger time-costing SwapLoadout actions
+}
+
+pub enum PositionIntent {
+  HoldGround,
+  AdvanceToMelee,
+  FleeToNearestExploredTile,
 }
 ```
 
@@ -329,13 +360,27 @@ pub struct Policy {
 All spatial algorithms live strictly within `core`, with no dependency on external rendering libraries.
 
 - **Pathing + minimal exploration intent (Milestone 2a):** A* pathing on discovered known-walkable tiles plus a simple frontier target selection (nearest unknown-adjacent discovered tile), with `AutoExploreIntent { target, reason, path_len }` produced as a first-class output.
-- **FOV refinement (Milestone 2b):** Full Field of View + improved frontier selection and hazard-aware movement.
+- **FOV minimum viable pass (Milestone 2b):** Simple deterministic FOV + frontier refinement + hazard-avoidance v0 (avoid known hazard tiles).
 
 ## 4.4 Deterministic Traversal Rules
 
 - Never rely on raw `slotmap` iteration order for simulation decisions, logging semantics, or hashing.
 - Before deterministic global passes, obtain active IDs and evaluate records in `spawn_seq` ascending order.
 - If `spawn_seq` ever collides due to bug/corruption, fail fast in debug builds (do not silently fallback to generational key order).
+
+## 4.5 Loadout Action Semantics (MVP)
+
+- `SwapLoadout` is a first-class simulation action with tick cost (same timing model as other actor actions).
+- Auto behavior may choose `SwapLoadout` based on `loadout_rule`, but it never bypasses turn economy.
+- Enemy reactions occur according to normal turn ordering; swapping can expose player to incoming actions.
+- Emit deterministic log events for executed swaps so replay/debug can explain pre-combat openings.
+
+## 4.6 MVP Combat Positioning Scope
+
+- Multi-enemy encounter handling is intentionally spatially naive in MVP.
+- `PositionIntent` is restricted to `HoldGround`, `AdvanceToMelee`, and `FleeToNearestExploredTile`.
+- No advanced tactical repositioning in MVP: no kiting logic, no deliberate LOS-break maneuvers, no corner-peeking planner.
+- Enemy selection and threat handling still use deterministic target-priority and retreat thresholds.
 
 ---
 
@@ -344,13 +389,51 @@ All spatial algorithms live strictly within `core`, with no dependency on extern
 Interrupt types (MVP subset):
 
 - LootFound
-- EnemyEncounter
+- EnemyEncounter (first-sighting pre-commit stop)
 - BranchChoice
 - GodOffer
 - CampChoice
 - PerkChoice
 - BossEncounter
 - CheckpointAvailable (easy mode only)
+
+Enemy encounter fairness contract (MVP):
+
+```rust
+pub struct EnemyEncounterInterrupt {
+  pub enemies: Vec<EntityId>,
+  pub threat: ThreatSummary,
+  pub opening_preview: Option<OpeningActionPreview>,
+}
+
+pub struct ThreatSummary {
+  pub horizon_ticks: u8,           // fixed small N (e.g., 3)
+  pub expected_damage_band: (u16, u16), // rough lower/upper estimate over N ticks
+  pub danger_tags: Vec<DangerTag>, // e.g., Poison, Burst, Ranged
+  pub escape_feasibility: EscapeFeasibility,
+}
+
+pub enum EscapeFeasibility {
+  Likely,
+  Uncertain,
+  Unlikely,
+}
+
+pub struct OpeningActionPreview {
+  pub action: OpeningAction,
+  pub tick_cost: u8,
+}
+
+pub enum OpeningAction {
+  SwapLoadout { to: LoadoutId },
+  HoldCurrentLoadout,
+}
+```
+
+MVP guidance:
+- This summary can be heuristic and conservative; it does not need perfect tactical forecasting.
+- Compute deterministically from current known state/policy so equal seeds and inputs produce equal summaries.
+- `EnemyEncounter` is emitted on first hostile sighting during auto-explore, before any opening swap/attack is executed.
 
 ---
 
@@ -500,10 +583,12 @@ async fn main() {
 - Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
 - Implement `RunState` and basic map structure (dense tile arrays).
 - Implement `advance(...)` API (`AdvanceResult`, `TickFrame`, stop reasons) and prompt-bound `apply_choice`.
+- Implement headless replay API in `core` (`replay_to_end(content, journal) -> ReplayResult`).
+- Add thin `tools/replay_runner` CLI wrapper that prints final `snapshot_hash`/outcome from a journal file.
 - Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
 - Implement two-clock auto loop (simulation fill + playback consume) with pause-at-next-tick-boundary behavior.
 - Implement Player + 1 enemy, turn engine, and fake loot interrupt.
-*Done when: repeated runs with the same seed produce identical interrupt sequence + snapshot hash.*
+*Done when: repeated runs with the same seed/journal produce identical final snapshot hash via headless replay API.*
 
 ## Milestone 2a — Basic Pathing & Interrupt Loop (10–12 hrs)
 - Implement A* pathing on discovered known-walkable tiles with fixed tie-break order.
@@ -516,20 +601,25 @@ async fn main() {
 *Done when: 5-minute auto-exploring run is playable, pauses on interrupts, and intent/reason changes are inspectable in the event log.*
 
 ## Milestone 2b — FOV & Exploration Intelligence (6–8 hrs)
-- Implement Field of View in `core`.
-- Improve frontier selection using visible frontier and danger scoring.
+- Implement minimum viable deterministic FOV in `core` (simple shadowcasting or equivalent simple method).
+- Improve frontier selection using visible frontier only.
+- Implement danger scoring v0: avoid known hazard tiles only.
+- Treat closed doors as walls until explicitly opened through an interrupt (no full door simulation in 2b).
 - Expand `AutoReason` usage for FOV/hazard-driven decisions.
-- Handle edge cases: unknown tiles, doors, hazards, soft-danger avoidance.
-*Done when: explore feels intentional and reason transitions remain coherent under FOV/hazard edge cases.*
+*Done when: explore remains coherent under FOV constraints and hazard avoidance v0, without complex door/hazard simulation.*
+Scope guard: advanced door/hazard simulation and richer danger scoring defer to Milestone 6 or post-MVP.
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
 - Multi-enemy encounters.
-- Implement full `Policy` controls (Target priority, Stance modifiers, Consumable thresholds, Retreat logic, pre-combat loadout rule).
+- Implement MVP `Policy` controls (Target priority, Stance modifiers, Consumable thresholds, Retreat logic, restricted `PositionIntent`, pre-combat loadout rule).
 - Restrict policy updates to paused tick boundaries and journal every accepted update with boundary tick.
+- Implement `SwapLoadout` as a time-costing simulation action (including auto-trigger from `loadout_rule`).
+- Ensure first-sighting `EnemyEncounter` interrupts occur before opening combat actions.
 - Implement a micro-set of test content (2 weapons, 1 consumable, 2 perks) to validate policy behaviors.
 - Wire UI to update policy knobs.
-- Add baseline fairness instrumentation: death-cause reason codes and a compact per-turn threat trace.
-*Done when: automated combat resolves from policy/build choices and death traces explain what happened.*
+- Add baseline fairness instrumentation: death-cause reason codes, enemy-encounter `ThreatSummary`, and a compact per-turn threat trace.
+*Done when: automated combat resolves from policy/build choices, opening swap costs are explicit/time-costed, encounter threat summaries are visible pre-commit, and death traces explain what happened with spatially naive positioning.*
+Scope guard: advanced tactical repositioning (kiting/LOS-breaking/corner play) defers to post-MVP.
 
 ## Milestone 4 — Floors + Branching (12–15 hrs)
 - Multiple floors.
@@ -545,7 +635,7 @@ async fn main() {
 *Done when: 3+ viable archetypes exist.*
 
 ## Milestone 6 — Fairness Tooling (8–10 hrs)
-- Threat summaries.
+- Expand/retune threat summaries beyond MVP heuristics.
 - Seed display + copy.
 - Determinism hash.
 - Death-recap UI using reason codes from Milestone 3.
@@ -599,6 +689,7 @@ Goal: maximize bug-catching per engineering hour, given a ~120 hour budget.
 | Test Layer | Value | Cost to Build | Ongoing Maintenance | MVP Decision |
 | --- | --- | --- | --- | --- |
 | Unit tests for combat, pathing, interrupt validation | High | Low | Low | Include |
+| Headless replay executor (`core` API + thin CLI wrapper) | High | Low-Medium | Low | Include |
 | Determinism smoke tests (same seed => same hash/interrupt trace in same build) | High | Low | Low | Include |
 | Property tests (`proptest`) for invariants (no negative HP, no invalid target IDs, replay/apply equivalence) | High | Medium | Low-Medium | Include (small targeted set) |
 | Golden replay files committed to repo | Medium | Medium-High | High (content churn rewrites files) | Defer |
@@ -608,6 +699,7 @@ Rationale:
 - Golden replay files are expensive during rapid content iteration because expected outputs churn frequently.
 - Small, focused property tests catch broad logic bugs without coupling tests to unstable content details.
 - Determinism smoke tests and replay round-trip tests (including checkpoint restore equivalence) provide core confidence with low maintenance.
+- The replay executor is API-first (better for CI and library-level tests); CLI remains a convenience layer, not the core contract.
 - Add batching-equivalence tests (`N` single-tick advances vs one `advance(N, ..)`) to protect performance optimizations without risking behavior drift.
 
 ---
