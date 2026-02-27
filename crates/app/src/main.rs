@@ -1,12 +1,13 @@
 use app::{
-    app_loop::{AppMode, AppState},
+    app_loop::{AppMode, AppState, RunCompletion},
+    engine_failure_code, format_seed, format_snapshot_hash, reason_code,
     seed::{generate_runtime_seed, resolve_seed_from_args},
 };
-use taffy::TaffyTree;
 use core::{ContentPack, Game, GameMode, Interrupt, LogEvent, Pos, TileKind};
 use macroquad::prelude::*;
 use macroquad::window::Conf;
 use std::{env, process::exit};
+use taffy::TaffyTree;
 use taffy::prelude::*;
 
 struct LayoutNodes {
@@ -23,29 +24,100 @@ struct LayoutNodes {
 }
 
 fn setup_layout(taffy: &mut TaffyTree<()>) -> LayoutNodes {
-    let status = taffy.new_leaf(Style { size: Size { width: percent(1.0), height: length(30.0) }, margin: taffy::Rect { left: zero(), right: zero(), top: zero(), bottom: length(20.0) }, ..Default::default() }).unwrap();
-    let map = taffy.new_leaf(Style { size: Size { width: percent(1.0), height: length(260.0) }, margin: taffy::Rect { left: zero(), right: zero(), top: zero(), bottom: length(20.0) }, ..Default::default() }).unwrap();
+    let status = taffy
+        .new_leaf(Style {
+            size: Size { width: percent(1.0), height: length(30.0) },
+            margin: taffy::Rect { left: zero(), right: zero(), top: zero(), bottom: length(20.0) },
+            ..Default::default()
+        })
+        .unwrap();
+    let map = taffy
+        .new_leaf(Style {
+            size: Size { width: percent(1.0), height: length(260.0) },
+            margin: taffy::Rect { left: zero(), right: zero(), top: zero(), bottom: length(20.0) },
+            ..Default::default()
+        })
+        .unwrap();
     let stats = taffy.new_leaf(Style { flex_grow: 1.0, ..Default::default() }).unwrap();
     let policy = taffy.new_leaf(Style { flex_grow: 1.2, ..Default::default() }).unwrap();
-    let threat = taffy.new_leaf(Style { flex_grow: 1.0, margin: taffy::Rect { left: length(20.0), right: zero(), top: zero(), bottom: zero() }, ..Default::default() }).unwrap();
-    let bottom_info = taffy.new_with_children(
-        Style { display: Display::Flex, flex_direction: FlexDirection::Row, size: Size { width: percent(1.0), height: percent(1.0) }, flex_grow: 1.0, ..Default::default() },
-        &[stats, policy, threat]
-    ).unwrap();
-    let left_col = taffy.new_with_children(
-        Style { display: Display::Flex, flex_direction: FlexDirection::Column, flex_grow: 1.5, margin: taffy::Rect { left: zero(), right: length(40.0), top: zero(), bottom: zero() }, ..Default::default() },
-        &[map, bottom_info]
-    ).unwrap();
+    let threat = taffy
+        .new_leaf(Style {
+            flex_grow: 1.0,
+            margin: taffy::Rect { left: length(20.0), right: zero(), top: zero(), bottom: zero() },
+            ..Default::default()
+        })
+        .unwrap();
+    let bottom_info = taffy
+        .new_with_children(
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                size: Size { width: percent(1.0), height: percent(1.0) },
+                flex_grow: 1.0,
+                ..Default::default()
+            },
+            &[stats, policy, threat],
+        )
+        .unwrap();
+    let left_col = taffy
+        .new_with_children(
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.5,
+                margin: taffy::Rect {
+                    left: zero(),
+                    right: length(40.0),
+                    top: zero(),
+                    bottom: zero(),
+                },
+                ..Default::default()
+            },
+            &[map, bottom_info],
+        )
+        .unwrap();
     let event_log = taffy.new_leaf(Style { flex_grow: 1.0, ..Default::default() }).unwrap();
-    let main_row = taffy.new_with_children(
-        Style { display: Display::Flex, flex_direction: FlexDirection::Row, size: Size { width: percent(1.0), height: auto() }, flex_grow: 1.0, ..Default::default() },
-        &[left_col, event_log]
-    ).unwrap();
-    let root = taffy.new_with_children(
-        Style { display: Display::Flex, flex_direction: FlexDirection::Column, size: Size { width: percent(1.0), height: percent(1.0) }, padding: taffy::Rect { left: length(20.0), right: length(20.0), top: length(20.0), bottom: length(20.0) }, ..Default::default() },
-        &[status, main_row]
-    ).unwrap();
-    LayoutNodes { root, status, main_row, left_col, map, bottom_info, stats, policy, threat, event_log }
+    let main_row = taffy
+        .new_with_children(
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                size: Size { width: percent(1.0), height: auto() },
+                flex_grow: 1.0,
+                ..Default::default()
+            },
+            &[left_col, event_log],
+        )
+        .unwrap();
+    let root = taffy
+        .new_with_children(
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                size: Size { width: percent(1.0), height: percent(1.0) },
+                padding: taffy::Rect {
+                    left: length(20.0),
+                    right: length(20.0),
+                    top: length(20.0),
+                    bottom: length(20.0),
+                },
+                ..Default::default()
+            },
+            &[status, main_row],
+        )
+        .unwrap();
+    LayoutNodes {
+        root,
+        status,
+        main_row,
+        left_col,
+        map,
+        bottom_info,
+        stats,
+        policy,
+        threat,
+        event_log,
+    }
 }
 
 fn window_conf() -> Conf {
@@ -118,7 +190,10 @@ async fn main() {
 
         app_state.tick(&mut game, &keys_pressed);
 
-        let available_size = Size { width: AvailableSpace::Definite(screen_width()), height: AvailableSpace::Definite(screen_height()) };
+        let available_size = Size {
+            width: AvailableSpace::Definite(screen_width()),
+            height: AvailableSpace::Definite(screen_height()),
+        };
         taffy.compute_layout(nodes.root, available_size).unwrap();
 
         let l_root = taffy.layout(nodes.root).unwrap();
@@ -135,7 +210,10 @@ async fn main() {
         let get_abs = |lyt: &taffy::Layout, parents: &[&taffy::Layout]| -> (f32, f32) {
             let mut x = lyt.location.x;
             let mut y = lyt.location.y;
-            for p in parents { x += p.location.x; y += p.location.y; }
+            for p in parents {
+                x += p.location.x;
+                y += p.location.y;
+            }
             (x, y)
         };
 
@@ -148,12 +226,54 @@ async fn main() {
 
         let border_color = Color::new(0.2, 0.2, 0.2, 1.0);
         let border_thickness = 1.0;
-        draw_rectangle_lines(pos_status.0, pos_status.1, l_status.size.width, l_status.size.height, border_thickness, border_color);
-        draw_rectangle_lines(pos_map.0, pos_map.1, l_map.size.width, l_map.size.height, border_thickness, border_color);
-        draw_rectangle_lines(pos_stats.0, pos_stats.1, l_stats.size.width, l_stats.size.height, border_thickness, border_color);
-        draw_rectangle_lines(pos_policy.0, pos_policy.1, l_policy.size.width, l_policy.size.height, border_thickness, border_color);
-        draw_rectangle_lines(pos_threat.0, pos_threat.1, l_threat.size.width, l_threat.size.height, border_thickness, border_color);
-        draw_rectangle_lines(pos_event.0, pos_event.1, l_event.size.width, l_event.size.height, border_thickness, border_color);
+        draw_rectangle_lines(
+            pos_status.0,
+            pos_status.1,
+            l_status.size.width,
+            l_status.size.height,
+            border_thickness,
+            border_color,
+        );
+        draw_rectangle_lines(
+            pos_map.0,
+            pos_map.1,
+            l_map.size.width,
+            l_map.size.height,
+            border_thickness,
+            border_color,
+        );
+        draw_rectangle_lines(
+            pos_stats.0,
+            pos_stats.1,
+            l_stats.size.width,
+            l_stats.size.height,
+            border_thickness,
+            border_color,
+        );
+        draw_rectangle_lines(
+            pos_policy.0,
+            pos_policy.1,
+            l_policy.size.width,
+            l_policy.size.height,
+            border_thickness,
+            border_color,
+        );
+        draw_rectangle_lines(
+            pos_threat.0,
+            pos_threat.1,
+            l_threat.size.width,
+            l_threat.size.height,
+            border_thickness,
+            border_color,
+        );
+        draw_rectangle_lines(
+            pos_event.0,
+            pos_event.1,
+            l_event.size.width,
+            l_event.size.height,
+            border_thickness,
+            border_color,
+        );
 
         let line_height = 18.0;
 
@@ -162,22 +282,45 @@ async fn main() {
 
         let status = match app_state.mode {
             AppMode::PendingPrompt { ref interrupt, .. } => prompt_text(interrupt),
-            AppMode::Finished(outcome) => format!("Finished ({:?})", outcome),
+            AppMode::Finished(ref completion) => match completion {
+                RunCompletion::Normal(outcome) => {
+                    format!("Finished: {}", reason_code(outcome))
+                }
+                RunCompletion::EngineFailure(reason) => {
+                    format!("Engine Failure: {}", engine_failure_code(reason))
+                }
+            },
             AppMode::AutoPlay => "Auto-Explore ON (Space to pause)".to_string(),
             AppMode::Paused => "Paused (Space to Auto-Explore, Right to step)".to_string(),
         };
         draw_text(&status, pos_status.0, pos_status.1 + 20.0, 20.0, WHITE);
-        
+
         let mut stats_y = pos_stats.1 + 20.0;
         let p_x = pos_stats.0;
-        draw_text(&format!("Tick: {}", game.current_tick()), p_x, stats_y, 20.0, WHITE); stats_y += 20.0;
-        draw_text(&format!("Seed: {run_seed}"), p_x, stats_y, 20.0, WHITE); stats_y += 20.0;
-        draw_text(&format!("Floor: {} / 3", game.state().floor_index), p_x, stats_y, 20.0, WHITE); stats_y += 20.0;
-        draw_text(&format!("Branch: {:?}", game.state().branch_profile), p_x, stats_y, 20.0, WHITE); stats_y += 20.0;
-        draw_text(&format!("God: {:?}", game.state().active_god), p_x, stats_y, 20.0, WHITE); stats_y += 20.0;
+        draw_text(&format!("Tick: {}", game.current_tick()), p_x, stats_y, 20.0, WHITE);
+        stats_y += 20.0;
+        draw_text(&format!("Seed: {}", format_seed(run_seed)), p_x, stats_y, 20.0, WHITE);
+        stats_y += 20.0;
+        draw_text(
+            &format!("Hash: {}", format_snapshot_hash(game.snapshot_hash())),
+            p_x,
+            stats_y,
+            20.0,
+            WHITE,
+        );
+        stats_y += 20.0;
+        draw_text(&format!("Floor: {} / 5", game.state().floor_index), p_x, stats_y, 20.0, WHITE);
+        stats_y += 20.0;
+        draw_text(&format!("Branch: {:?}", game.state().branch_profile), p_x, stats_y, 20.0, WHITE);
+        stats_y += 20.0;
+        draw_text(&format!("God: {:?}", game.state().active_god), p_x, stats_y, 20.0, WHITE);
+        stats_y += 20.0;
 
         let intent_text = if let Some(intent) = game.state().auto_intent {
-            format!("Intent: {:?} target=({}, {}) path_len={}", intent.reason, intent.target.x, intent.target.y, intent.path_len)
+            format!(
+                "Intent: {:?} target=({}, {}) path_len={}",
+                intent.reason, intent.target.x, intent.target.y, intent.path_len
+            )
         } else {
             "Intent: none".to_string()
         };
@@ -186,21 +329,69 @@ async fn main() {
         let policy = &game.state().policy;
         let mut pol_y = pos_policy.1 + 20.0;
         let pol_x = pos_policy.0;
-        draw_text("Policy: ", pol_x, pol_y, 20.0, YELLOW); pol_y += 20.0;
-        draw_text(&format!("[M]ode: {:?}", policy.fight_or_avoid), pol_x, pol_y, 18.0, LIGHTGRAY); pol_y += 20.0;
-        draw_text(&format!("s[T]ance: {:?}", policy.stance), pol_x, pol_y, 18.0, LIGHTGRAY); pol_y += 20.0;
-        draw_text(&format!("[P]riority: {:?}", policy.target_priority), pol_x, pol_y, 18.0, LIGHTGRAY); pol_y += 20.0;
-        draw_text(&format!("[R]etreat HP: {}%", policy.retreat_hp_threshold), pol_x, pol_y, 18.0, LIGHTGRAY); pol_y += 20.0;
-        draw_text(&format!("[H]eal: {:?}", policy.auto_heal_if_below_threshold), pol_x, pol_y, 18.0, LIGHTGRAY); pol_y += 20.0;
-        draw_text(&format!("[I]ntent: {:?}", policy.position_intent), pol_x, pol_y, 18.0, LIGHTGRAY); pol_y += 20.0;
-        draw_text(&format!("[E]xplore: {:?}", policy.exploration_mode), pol_x, pol_y, 18.0, LIGHTGRAY); pol_y += 20.0;
-        draw_text(&format!("[G]reed: {:?}", policy.resource_aggression), pol_x, pol_y, 18.0, LIGHTGRAY);
+        draw_text("Policy: ", pol_x, pol_y, 20.0, YELLOW);
+        pol_y += 20.0;
+        draw_text(&format!("[M]ode: {:?}", policy.fight_or_avoid), pol_x, pol_y, 18.0, LIGHTGRAY);
+        pol_y += 20.0;
+        draw_text(&format!("s[T]ance: {:?}", policy.stance), pol_x, pol_y, 18.0, LIGHTGRAY);
+        pol_y += 20.0;
+        draw_text(
+            &format!("[P]riority: {:?}", policy.target_priority),
+            pol_x,
+            pol_y,
+            18.0,
+            LIGHTGRAY,
+        );
+        pol_y += 20.0;
+        draw_text(
+            &format!("[R]etreat HP: {}%", policy.retreat_hp_threshold),
+            pol_x,
+            pol_y,
+            18.0,
+            LIGHTGRAY,
+        );
+        pol_y += 20.0;
+        draw_text(
+            &format!("[H]eal: {:?}", policy.auto_heal_if_below_threshold),
+            pol_x,
+            pol_y,
+            18.0,
+            LIGHTGRAY,
+        );
+        pol_y += 20.0;
+        draw_text(
+            &format!("[I]ntent: {:?}", policy.position_intent),
+            pol_x,
+            pol_y,
+            18.0,
+            LIGHTGRAY,
+        );
+        pol_y += 20.0;
+        draw_text(
+            &format!("[E]xplore: {:?}", policy.exploration_mode),
+            pol_x,
+            pol_y,
+            18.0,
+            LIGHTGRAY,
+        );
+        pol_y += 20.0;
+        draw_text(
+            &format!("[G]reed: {:?}", policy.resource_aggression),
+            pol_x,
+            pol_y,
+            18.0,
+            LIGHTGRAY,
+        );
 
         let mut thr_y = pos_threat.1 + 20.0;
         let thr_x = pos_threat.0;
-        draw_text("Threat Trace:", thr_x, thr_y, 20.0, RED); thr_y += 20.0;
+        draw_text("Threat Trace:", thr_x, thr_y, 20.0, RED);
+        thr_y += 20.0;
         for (i, trace) in game.state().threat_trace.iter().take(5).enumerate() {
-            let desc = format!("T{}: {} vis, dist {:?}", trace.tick, trace.visible_enemy_count, trace.min_enemy_distance);
+            let desc = format!(
+                "T{}: {} vis, dist {:?}",
+                trace.tick, trace.visible_enemy_count, trace.min_enemy_distance
+            );
             let color = if trace.retreat_triggered { ORANGE } else { LIGHTGRAY };
             draw_text(&desc, thr_x, thr_y + (i as f32 * 20.0), 18.0, color);
         }
@@ -306,7 +497,17 @@ fn prompt_text(interrupt: &Interrupt) -> String {
     match interrupt {
         Interrupt::LootFound { .. } => "INTERRUPT: Loot found (L=keep, D=discard)".to_string(),
         Interrupt::EnemyEncounter { threat, .. } => {
-            format!("INTERRUPT: Enemy sighted (F=fight, A=avoid) Tags: {:?}", threat.danger_tags)
+            let dist_text = match threat.nearest_enemy_distance {
+                Some(d) => format!("{d}"),
+                None => "?".to_string(),
+            };
+            format!(
+                "INTERRUPT: {:?} sighted (F=fight, A=avoid) {} visible, nearest={}, Tags: {:?}",
+                threat.primary_enemy_kind,
+                threat.visible_enemy_count,
+                dist_text,
+                threat.danger_tags
+            )
         }
         Interrupt::DoorBlocked { .. } => "INTERRUPT: Door blocked (O=open)".to_string(),
         Interrupt::FloorTransition { next_floor, requires_branch_god_choice, .. } => {

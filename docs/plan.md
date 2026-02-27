@@ -822,26 +822,26 @@ Execution guardrails for all Milestone 6 passes:
 - [ ] Keep all `core`-side iteration deterministic (stable ordering and deterministic tie-break rules).
 
 ### Milestone 6a — Threat Tags + Static Encounter Facts (1–2 hrs)
-- [ ] Extend `ThreatSummary` in `crates/core/src/types.rs` with deterministic static facts:
-  - [ ] `visible_enemy_count: usize`
-  - [ ] `nearest_enemy_distance: Option<u32>`
-  - [ ] `primary_enemy_kind: ActorKind`
-- [ ] In `crates/core/src/game.rs`, replace ad-hoc Goblin-only tagging with a deterministic per-`ActorKind` tag map.
-- [ ] Keep `danger_tags` deterministically sorted + deduplicated before storing in `ThreatSummary`.
-- [ ] Update `Interrupt::EnemyEncounter` construction to populate all new `ThreatSummary` fields.
-- [ ] Update threat text rendering in `crates/app/src/main.rs::prompt_text` to include enemy count and nearest distance.
-- [ ] Add/adjust tests in `crates/core/src/types.rs` and `crates/core/src/game.rs`:
-  - [ ] Tag ordering remains deterministic.
-  - [ ] New static fact fields are correct for a known fixture encounter.
+- [x] Extend `ThreatSummary` in `crates/core/src/types.rs` with deterministic static facts:
+  - [x] `visible_enemy_count: usize`
+  - [x] `nearest_enemy_distance: Option<u32>`
+  - [x] `primary_enemy_kind: ActorKind`
+- [x] In `crates/core/src/game.rs`, replace ad-hoc Goblin-only tagging with a deterministic per-`ActorKind` tag map.
+- [x] Keep `danger_tags` deterministically sorted + deduplicated before storing in `ThreatSummary`.
+- [x] Update `Interrupt::EnemyEncounter` construction to populate all new `ThreatSummary` fields.
+- [x] Update threat text rendering in `crates/app/src/main.rs::prompt_text` to include enemy count and nearest distance.
+- [x] Add/adjust tests in `crates/core/src/types.rs` and `crates/core/src/game.rs`:
+  - [x] Tag ordering remains deterministic.
+  - [x] New static fact fields are correct for a known fixture encounter.
 **Pass 6a Exit Criteria:**
 - **a) User Experience:** Encounter prompts communicate clear, static threat facts (not opaque warnings).
 - **b) Progress toward vision:** Improves explainability of policy outcomes without adding tactical forecasting complexity.
 - **c) Architecture & Maintainability:** Threat summary contract is explicit, test-backed, and deterministic.
 
 ### Milestone 6b — Seed Display (0.5–1 hr)
-- [ ] Keep seed visible in HUD at all times in `crates/app/src/main.rs`.
-- [ ] Normalize seed rendering to exact decimal string format (no prefixes/suffixes).
-- [ ] Add a small unit test for seed text formatting helper in `crates/app/src/lib.rs`.
+- [x] Keep seed visible in HUD at all times in `crates/app/src/main.rs`.
+- [x] Normalize seed rendering to exact decimal string format (no prefixes/suffixes).
+- [x] Add a small unit test for seed text formatting helper in `crates/app/src/lib.rs`.
 **Pass 6b Exit Criteria:**
 - **a) User Experience:** Player can always see the exact seed for the current run.
 - **b) Progress toward vision:** Supports "no opaque randomness" by making run identity explicit.
@@ -880,24 +880,24 @@ Execution guardrails for all Milestone 6 passes:
 - **c) Architecture & Maintainability:** Hash/seed visibility and crash-recoverable persistence are standardized and regression-tested.
 
 ### Milestone 6d — Death Recap UI + Reason Codes (1–2 hrs)
-- [ ] In `crates/app/src/app_loop.rs`, stop panicking on `AdvanceStopReason::EngineFailure`.
-- [ ] Extend app completion state to represent both:
-  - [ ] Normal run outcomes (`Victory`, `Defeat(DeathCause)`)
-  - [ ] Engine failures (`EngineFailureReason`)
-- [ ] In `crates/app/src/main.rs`, replace generic finished text with a recap block including:
-  - [ ] Reason code (exact string mapping):
-    - [ ] `WIN_CLEAR`
-    - [ ] `DMG_HP_ZERO`
-    - [ ] `PSN_HP_ZERO`
-    - [ ] `ENG_STALLED_NO_PROGRESS`
-  - [ ] Seed
-  - [ ] Snapshot hash
-  - [ ] Floor / Branch / God
-  - [ ] Tick
-  - [ ] Latest 5 threat-trace rows
-- [ ] Add app tests in `crates/app/tests/app_mode.rs`:
-  - [ ] Finished mode triggers for normal run completion.
-  - [ ] Finished mode triggers for engine failure (no panic).
+- [x] In `crates/app/src/app_loop.rs`, stop panicking on `AdvanceStopReason::EngineFailure`.
+- [x] Extend app completion state to represent both:
+  - [x] Normal run outcomes (`Victory`, `Defeat(DeathCause)`)
+  - [x] Engine failures (`EngineFailureReason`)
+- [x] In `crates/app/src/main.rs`, replace generic finished text with a recap block including:
+  - [x] Reason code (exact string mapping):
+    - [x] `WIN_CLEAR`
+    - [x] `DMG_HP_ZERO`
+    - [x] `PSN_HP_ZERO`
+    - [x] `ENG_STALLED_NO_PROGRESS`
+  - [x] Seed
+  - [x] Snapshot hash
+  - [x] Floor / Branch / God
+  - [x] Tick
+  - [x] Latest 5 threat-trace rows
+- [x] Add app tests in `crates/app/tests/app_mode.rs`:
+  - [x] Finished mode triggers for normal run completion.
+  - [x] Finished mode triggers for engine failure (no panic).
 **Pass 6d Exit Criteria:**
 - **a) User Experience:** Defeat and failure states are explicit and understandable, not ambiguous.
 - **b) Progress toward vision:** Reinforces "lethal but fair" by explaining what happened.

@@ -26,7 +26,7 @@ pub enum ItemKind {
     Perk(&'static str),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ActorKind {
     Player,
     Goblin,
@@ -96,6 +96,9 @@ pub enum DangerTag {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreatSummary {
     pub danger_tags: Vec<DangerTag>,
+    pub visible_enemy_count: usize,
+    pub nearest_enemy_distance: Option<u32>,
+    pub primary_enemy_kind: ActorKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -268,13 +271,31 @@ mod tests {
         ];
         tags.sort();
         tags.dedup();
-        let summary = ThreatSummary { danger_tags: tags };
+        let summary = ThreatSummary {
+            danger_tags: tags,
+            visible_enemy_count: 1,
+            nearest_enemy_distance: Some(1),
+            primary_enemy_kind: ActorKind::Goblin,
+        };
 
         // Ord derives sequentially: Melee, Ranged, Poison, Burst
         assert_eq!(
             summary.danger_tags,
             vec![DangerTag::Melee, DangerTag::Ranged, DangerTag::Poison, DangerTag::Burst,]
         );
+    }
+
+    #[test]
+    fn test_threat_summary_static_facts() {
+        let summary = ThreatSummary {
+            danger_tags: vec![DangerTag::Melee, DangerTag::Burst],
+            visible_enemy_count: 3,
+            nearest_enemy_distance: Some(2),
+            primary_enemy_kind: ActorKind::FeralHound,
+        };
+        assert_eq!(summary.visible_enemy_count, 3);
+        assert_eq!(summary.nearest_enemy_distance, Some(2));
+        assert_eq!(summary.primary_enemy_kind, ActorKind::FeralHound);
     }
 }
 

@@ -947,18 +947,47 @@ impl Game {
         steps: u32,
     ) -> AdvanceResult {
         let player = &self.state.actors[self.state.player_id];
+        let player_pos = player.pos;
         let hp_percent = (player.hp * 100) / player.max_hp;
         let retreat_eligible = hp_percent <= (self.state.policy.retreat_hp_threshold as i32);
 
         let mut tags = Vec::new();
         for &e_id in &enemies {
-            if self.state.actors.get(e_id).is_some_and(|e| e.kind == ActorKind::Goblin) {
-                tags.push(DangerTag::Melee);
+            if let Some(actor) = self.state.actors.get(e_id) {
+                tags.extend(danger_tags_for_kind(actor.kind));
             }
         }
         tags.sort();
         tags.dedup();
-        let threat = ThreatSummary { danger_tags: tags };
+
+        let visible_enemy_count = self
+            .state
+            .actors
+            .iter()
+            .filter(|(id, actor)| {
+                *id != self.state.player_id && self.state.map.is_visible(actor.pos)
+            })
+            .count();
+        let nearest_enemy_distance = self
+            .state
+            .actors
+            .iter()
+            .filter_map(|(id, actor)| {
+                if id != self.state.player_id && self.state.map.is_visible(actor.pos) {
+                    Some(manhattan(player_pos, actor.pos))
+                } else {
+                    None
+                }
+            })
+            .min();
+        let primary_enemy_kind = self.state.actors[primary_enemy].kind;
+
+        let threat = ThreatSummary {
+            danger_tags: tags,
+            visible_enemy_count,
+            nearest_enemy_distance,
+            primary_enemy_kind,
+        };
 
         let prompt = PendingPrompt {
             id: ChoicePromptId(self.next_input_seq),
@@ -1157,6 +1186,20 @@ impl Game {
         if should_clear {
             self.suppressed_enemy = None;
         }
+    }
+}
+
+fn danger_tags_for_kind(kind: ActorKind) -> Vec<DangerTag> {
+    match kind {
+        ActorKind::Player => vec![],
+        ActorKind::Goblin => vec![DangerTag::Melee],
+        ActorKind::FeralHound => vec![DangerTag::Melee, DangerTag::Burst],
+        ActorKind::BloodAcolyte => vec![DangerTag::Melee, DangerTag::Poison],
+        ActorKind::CorruptedGuard => vec![DangerTag::Melee],
+        ActorKind::LivingArmor => vec![DangerTag::Melee],
+        ActorKind::Gargoyle => vec![DangerTag::Melee],
+        ActorKind::ShadowStalker => vec![DangerTag::Melee, DangerTag::Burst],
+        ActorKind::AbyssalWarden => vec![DangerTag::Melee, DangerTag::Burst],
     }
 }
 
@@ -3237,5 +3280,77 @@ mod tests {
 
         assert_eq!(left, right, "magnetic lure results should not depend on insertion order");
         assert_eq!(left, vec![Pos { y: 4, x: 5 }, Pos { y: 4, x: 6 }]);
+    }
+
+    #[test]
+    fn danger_tags_for_each_kind_are_deterministic_and_sorted() {
+        let kinds = [
+            ActorKind::Goblin,
+            ActorKind::FeralHound,
+            ActorKind::BloodAcolyte,
+            ActorKind::CorruptedGuard,
+            ActorKind::LivingArmor,
+            ActorKind::Gargoyle,
+            ActorKind::ShadowStalker,
+            ActorKind::AbyssalWarden,
+        ];
+        for kind in kinds {
+            let tags = danger_tags_for_kind(kind);
+            assert!(!tags.is_empty(), "{kind:?} should have at least one danger tag");
+            let mut sorted = tags.clone();
+            sorted.sort();
+            assert_eq!(tags, sorted, "{kind:?} tags should be pre-sorted");
+        }
+        // Player should have no danger tags
+        assert!(danger_tags_for_kind(ActorKind::Player).is_empty());
+    }
+
+    #[test]
+    fn encounter_interrupt_populates_static_threat_facts() {
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
+        // Run until an enemy encounter
+        for _ in 0..250 {
+            match game.advance(1).stop_reason {
+                AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter {
+                    threat,
+                    enemies,
+                    ..
+                }) => {
+                    assert!(threat.visible_enemy_count > 0);
+                    assert!(threat.nearest_enemy_distance.is_some());
+                    assert_ne!(threat.primary_enemy_kind, ActorKind::Player);
+                    assert!(!threat.danger_tags.is_empty());
+                    // Verify tags are sorted and deduped
+                    let mut sorted_tags = threat.danger_tags.clone();
+                    sorted_tags.sort();
+                    sorted_tags.dedup();
+                    assert_eq!(threat.danger_tags, sorted_tags);
+                    // Enemy count should be >= encounter list size
+                    assert!(threat.visible_enemy_count >= enemies.len());
+                    return;
+                }
+                AdvanceStopReason::Interrupted(Interrupt::LootFound { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
+                }
+                AdvanceStopReason::Interrupted(Interrupt::DoorBlocked { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
+                }
+                AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                    prompt_id,
+                    requires_branch_god_choice,
+                    ..
+                }) => {
+                    let choice = if requires_branch_god_choice {
+                        Choice::DescendBranchAVeil
+                    } else {
+                        Choice::Descend
+                    };
+                    game.apply_choice(prompt_id, choice).unwrap();
+                }
+                AdvanceStopReason::Finished(_) | AdvanceStopReason::EngineFailure(_) => break,
+                _ => {}
+            }
+        }
+        panic!("did not encounter an enemy within 250 ticks");
     }
 }

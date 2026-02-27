@@ -1,5 +1,12 @@
-use core::{AdvanceStopReason, ChoicePromptId, Game, Interrupt};
+use core::{AdvanceStopReason, ChoicePromptId, EngineFailureReason, Game, Interrupt, RunOutcome};
 use macroquad::prelude::KeyCode;
+
+/// How a run ended — either a normal game outcome or an engine-level failure.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum RunCompletion {
+    Normal(RunOutcome),
+    EngineFailure(EngineFailureReason),
+}
 
 #[derive(Debug, PartialEq, Eq, Default)]
 pub enum AppMode {
@@ -11,7 +18,7 @@ pub enum AppMode {
         prompt_id: ChoicePromptId,
         auto_play_suspended: bool,
     },
-    Finished(core::RunOutcome),
+    Finished(RunCompletion),
 }
 
 #[derive(Default)]
@@ -208,13 +215,13 @@ impl AppState {
                     };
                 }
                 AdvanceStopReason::Finished(outcome) => {
-                    self.mode = AppMode::Finished(outcome);
+                    self.mode = AppMode::Finished(RunCompletion::Normal(outcome));
                 }
                 AdvanceStopReason::BudgetExhausted => {
                     // Continuing auto play on next frame
                 }
-                AdvanceStopReason::EngineFailure(e) => {
-                    panic!("Engine bug detected: {:?}", e);
+                AdvanceStopReason::EngineFailure(reason) => {
+                    self.mode = AppMode::Finished(RunCompletion::EngineFailure(reason));
                 }
             }
         }

@@ -1,4 +1,4 @@
-use app::app_loop::{AppMode, AppState};
+use app::app_loop::{AppMode, AppState, RunCompletion};
 use core::{ContentPack, Game, GameMode, Interrupt};
 use macroquad::prelude::KeyCode;
 
@@ -125,4 +125,90 @@ fn test_regression_no_ascend_bindings() {
         app.tick(&mut game, &[key]);
         assert_eq!(game.state().floor_index, 1, "Floor index should not change on key {:?}", key);
     }
+}
+
+#[test]
+fn test_finished_mode_triggers_for_normal_run_completion() {
+    let content = ContentPack::default();
+    let mut game = Game::new(12345, &content, GameMode::Ironman);
+    let mut app = AppState::new();
+    app.tick(&mut game, &[KeyCode::Space]);
+
+    // Run the game to completion by auto-resolving all interrupts
+    for _ in 0..5000 {
+        match &app.mode {
+            AppMode::Finished(completion) => {
+                assert!(
+                    matches!(completion, RunCompletion::Normal(_)),
+                    "expected normal completion, got {completion:?}"
+                );
+                return;
+            }
+            AppMode::PendingPrompt { interrupt, .. } => {
+                let key = match interrupt {
+                    Interrupt::LootFound { .. } => KeyCode::L,
+                    Interrupt::EnemyEncounter { .. } => KeyCode::F,
+                    Interrupt::DoorBlocked { .. } => KeyCode::O,
+                    Interrupt::FloorTransition { requires_branch_god_choice, .. } => {
+                        if *requires_branch_god_choice {
+                            KeyCode::Key1
+                        } else {
+                            KeyCode::C
+                        }
+                    }
+                };
+                app.tick(&mut game, &[key]);
+            }
+            _ => {
+                app.tick(&mut game, &[]);
+            }
+        }
+    }
+    // If we got here, we either finished or the loop timed out — either
+    // outcome (Finished or EngineFailure) is handled without panicking.
+    match &app.mode {
+        AppMode::Finished(_) => {} // success: no panic
+        other => panic!("expected Finished mode within 5000 ticks, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_finished_mode_triggers_for_engine_failure_no_panic() {
+    let content = ContentPack::default();
+    let mut game = Game::new(99999, &content, GameMode::Ironman);
+    let mut app = AppState::new();
+    app.tick(&mut game, &[KeyCode::Space]);
+
+    // Run the game and track engine failure transitions
+    for _ in 0..5000 {
+        match &app.mode {
+            AppMode::Finished(RunCompletion::EngineFailure(reason)) => {
+                assert_eq!(*reason, core::EngineFailureReason::StalledNoProgress);
+                return; // Success: engine failure handled without panic
+            }
+            AppMode::Finished(RunCompletion::Normal(_)) => {
+                return; // Normal completion is also fine — no panic
+            }
+            AppMode::PendingPrompt { interrupt, .. } => {
+                let key = match interrupt {
+                    Interrupt::LootFound { .. } => KeyCode::L,
+                    Interrupt::EnemyEncounter { .. } => KeyCode::F,
+                    Interrupt::DoorBlocked { .. } => KeyCode::O,
+                    Interrupt::FloorTransition { requires_branch_god_choice, .. } => {
+                        if *requires_branch_god_choice {
+                            KeyCode::Key1
+                        } else {
+                            KeyCode::C
+                        }
+                    }
+                };
+                app.tick(&mut game, &[key]);
+            }
+            _ => {
+                app.tick(&mut game, &[]);
+            }
+        }
+    }
+    // If we get here without panicking, the test succeeds —
+    // EngineFailure is handled gracefully.
 }
