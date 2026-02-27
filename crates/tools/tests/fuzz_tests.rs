@@ -1,5 +1,8 @@
+use game_core::{
+    AdvanceStopReason, Choice, ContentPack, DeathCause, Game, GameMode, Interrupt, RunOutcome,
+    TileKind,
+};
 use proptest::prelude::*;
-use game_core::{AdvanceStopReason, Choice, ContentPack, Game, GameMode, Interrupt, TileKind, RunOutcome, DeathCause};
 use rand_chacha::{
     ChaCha8Rng,
     rand_core::{Rng, SeedableRng},
@@ -23,24 +26,23 @@ fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Resul
         match result.stop_reason {
             AdvanceStopReason::Finished(outcome) => {
                 if let RunOutcome::Defeat(DeathCause::StalledNoProgress) = outcome {
-                    return Err(format!("StalledNoProgress after {} ticks with map_seed {} and choice_seed {}", total_steps, map_seed, choice_seed));
+                    return Err(format!(
+                        "StalledNoProgress after {} ticks with map_seed {} and choice_seed {}",
+                        total_steps, map_seed, choice_seed
+                    ));
                 }
                 break;
             }
             AdvanceStopReason::Interrupted(interrupt) => {
                 let (prompt_id, choice) = match interrupt {
-                    Interrupt::EnemyEncounter { prompt_id, .. } => {
-                        (
-                            prompt_id,
-                            choose(&mut rng, &[Choice::Fight, Choice::Avoid, Choice::Fight]),
-                        ) 
-                    }
+                    Interrupt::EnemyEncounter { prompt_id, .. } => (
+                        prompt_id,
+                        choose(&mut rng, &[Choice::Fight, Choice::Avoid, Choice::Fight]),
+                    ),
                     Interrupt::LootFound { prompt_id, .. } => {
                         (prompt_id, choose(&mut rng, &[Choice::KeepLoot, Choice::DiscardLoot]))
                     }
-                    Interrupt::DoorBlocked { prompt_id, .. } => {
-                        (prompt_id, Choice::OpenDoor)
-                    }
+                    Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
                     Interrupt::FloorTransition { prompt_id, requires_branch_choice, .. } => {
                         if requires_branch_choice {
                             (
@@ -65,7 +67,10 @@ fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Resul
             }
             let tile = state.map.tile_at(actor.pos);
             if tile == TileKind::Wall {
-                return Err(format!("Invariant failed: Actor inside wall on map_seed {}", map_seed));
+                return Err(format!(
+                    "Invariant failed: Actor inside wall on map_seed {}",
+                    map_seed
+                ));
             }
         }
     }
