@@ -14,7 +14,7 @@ Ensure a stable baseline and robust regression tests are in place to verify the 
 - [x] Task: Verify that all baseline tests pass with the current A*-based implementation. b9d6378
 - [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md) b9d6378
 
-## Phase 2: Implement Single-Source BFS/Dijkstra Planner
+## Phase 2: Implement Single-Source BFS/Dijkstra Planner [checkpoint: 6392c18]
 
 Replace the current loop of A* scans with the optimized single-source searches in `choose_frontier_intent`.
 
