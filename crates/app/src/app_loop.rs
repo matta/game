@@ -2,9 +2,9 @@ use core::{AdvanceStopReason, ChoicePromptId, EngineFailureReason, Game, Interru
 use macroquad::prelude::KeyCode;
 
 /// How a run ended — either a normal game outcome or an engine-level failure.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum RunCompletion {
-    Normal(RunOutcome),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppCompletion {
+    Outcome(RunOutcome),
     EngineFailure(EngineFailureReason),
 }
 
@@ -18,7 +18,7 @@ pub enum AppMode {
         prompt_id: ChoicePromptId,
         auto_play_suspended: bool,
     },
-    Finished(RunCompletion),
+    Finished(AppCompletion),
 }
 
 #[derive(Default)]
@@ -197,33 +197,68 @@ impl AppState {
         }
 
         if let Some(result) = advance_result {
-            match result.stop_reason {
-                AdvanceStopReason::PausedAtBoundary { .. } => {
-                    self.mode = AppMode::Paused;
-                }
-                AdvanceStopReason::Interrupted(interrupt) => {
-                    let prompt_id = match interrupt {
-                        Interrupt::LootFound { prompt_id, .. } => prompt_id,
-                        Interrupt::EnemyEncounter { prompt_id, .. } => prompt_id,
-                        Interrupt::DoorBlocked { prompt_id, .. } => prompt_id,
-                        Interrupt::FloorTransition { prompt_id, .. } => prompt_id,
-                    };
-                    self.mode = AppMode::PendingPrompt {
-                        interrupt,
-                        prompt_id,
-                        auto_play_suspended: matches!(self.mode, AppMode::AutoPlay),
-                    };
-                }
-                AdvanceStopReason::Finished(outcome) => {
-                    self.mode = AppMode::Finished(RunCompletion::Normal(outcome));
-                }
-                AdvanceStopReason::BudgetExhausted => {
-                    // Continuing auto play on next frame
-                }
-                AdvanceStopReason::EngineFailure(reason) => {
-                    self.mode = AppMode::Finished(RunCompletion::EngineFailure(reason));
-                }
+            let auto_play_suspended = matches!(self.mode, AppMode::AutoPlay);
+            self.apply_stop_reason(result.stop_reason, auto_play_suspended);
+        }
+    }
+
+    pub fn apply_stop_reason(&mut self, stop_reason: AdvanceStopReason, auto_play_suspended: bool) {
+        match stop_reason {
+            AdvanceStopReason::PausedAtBoundary { .. } => {
+                self.mode = AppMode::Paused;
+            }
+            AdvanceStopReason::Interrupted(interrupt) => {
+                let prompt_id = match interrupt {
+                    Interrupt::LootFound { prompt_id, .. } => prompt_id,
+                    Interrupt::EnemyEncounter { prompt_id, .. } => prompt_id,
+                    Interrupt::DoorBlocked { prompt_id, .. } => prompt_id,
+                    Interrupt::FloorTransition { prompt_id, .. } => prompt_id,
+                };
+                self.mode = AppMode::PendingPrompt { interrupt, prompt_id, auto_play_suspended };
+            }
+            AdvanceStopReason::Finished(outcome) => {
+                self.mode = AppMode::Finished(AppCompletion::Outcome(outcome));
+            }
+            AdvanceStopReason::BudgetExhausted => {
+                // Continuing auto play on next frame
+            }
+            AdvanceStopReason::EngineFailure(reason) => {
+                self.mode = AppMode::Finished(AppCompletion::EngineFailure(reason));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppCompletion, AppMode, AppState};
+    use core::{AdvanceStopReason, DeathCause, EngineFailureReason, RunOutcome};
+
+    #[test]
+    fn finished_outcome_maps_to_finished_mode() {
+        let mut app = AppState::new();
+        app.apply_stop_reason(
+            AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::Damage)),
+            false,
+        );
+        assert_eq!(
+            app.mode,
+            AppMode::Finished(AppCompletion::Outcome(RunOutcome::Defeat(DeathCause::Damage,)))
+        );
+    }
+
+    #[test]
+    fn engine_failure_maps_to_finished_mode_without_panic() {
+        let mut app = AppState::new();
+        app.apply_stop_reason(
+            AdvanceStopReason::EngineFailure(EngineFailureReason::StalledNoProgress),
+            true,
+        );
+        assert_eq!(
+            app.mode,
+            AppMode::Finished(
+                AppCompletion::EngineFailure(EngineFailureReason::StalledNoProgress,)
+            )
+        );
     }
 }

@@ -1,5 +1,8 @@
-use app::app_loop::{AppMode, AppState, RunCompletion};
-use core::{ContentPack, Game, GameMode, Interrupt};
+use app::app_loop::{AppCompletion, AppMode, AppState};
+use core::{
+    AdvanceStopReason, ContentPack, DeathCause, EngineFailureReason, Game, GameMode, Interrupt,
+    RunOutcome,
+};
 use macroquad::prelude::KeyCode;
 
 #[test]
@@ -139,7 +142,7 @@ fn test_finished_mode_triggers_for_normal_run_completion() {
         match &app.mode {
             AppMode::Finished(completion) => {
                 assert!(
-                    matches!(completion, RunCompletion::Normal(_)),
+                    matches!(completion, AppCompletion::Outcome(_)),
                     "expected normal completion, got {completion:?}"
                 );
                 return;
@@ -182,11 +185,11 @@ fn test_finished_mode_triggers_for_engine_failure_no_panic() {
     // Run the game and track engine failure transitions
     for _ in 0..5000 {
         match &app.mode {
-            AppMode::Finished(RunCompletion::EngineFailure(reason)) => {
+            AppMode::Finished(AppCompletion::EngineFailure(reason)) => {
                 assert_eq!(*reason, core::EngineFailureReason::StalledNoProgress);
                 return; // Success: engine failure handled without panic
             }
-            AppMode::Finished(RunCompletion::Normal(_)) => {
+            AppMode::Finished(AppCompletion::Outcome(_)) => {
                 return; // Normal completion is also fine — no panic
             }
             AppMode::PendingPrompt { interrupt, .. } => {
@@ -211,4 +214,30 @@ fn test_finished_mode_triggers_for_engine_failure_no_panic() {
     }
     // If we get here without panicking, the test succeeds —
     // EngineFailure is handled gracefully.
+}
+
+#[test]
+fn test_finished_mode_triggers_for_normal_outcome() {
+    let mut app = AppState::new();
+    app.apply_stop_reason(
+        AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::Damage)),
+        false,
+    );
+    assert_eq!(
+        app.mode,
+        AppMode::Finished(AppCompletion::Outcome(RunOutcome::Defeat(DeathCause::Damage)))
+    );
+}
+
+#[test]
+fn test_finished_mode_triggers_for_engine_failure_without_panic() {
+    let mut app = AppState::new();
+    app.apply_stop_reason(
+        AdvanceStopReason::EngineFailure(EngineFailureReason::StalledNoProgress),
+        true,
+    );
+    assert_eq!(
+        app.mode,
+        AppMode::Finished(AppCompletion::EngineFailure(EngineFailureReason::StalledNoProgress))
+    );
 }

@@ -76,6 +76,8 @@ pub enum DeathCause {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineFailureReason {
+    /// Fail-safe stop used to prevent infinite loops when simulation cannot advance.
+    /// If this appears during real gameplay, floor generation or game logic is broken.
     StalledNoProgress,
 }
 

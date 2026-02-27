@@ -944,7 +944,7 @@ Milestone 6 task completion checklist:
 - [ ] Seed display.
 - [ ] Determinism hash.
 - [ ] Persist seed + snapshot hash to `./.game_state/last_run_state.json` with crash-recoverable startup readback.
-- [ ] Death-recap UI using reason codes from Milestone 3.
+- [x] Death-recap UI using reason codes from Milestone 3.
 - [ ] Replace repeated per-candidate A* frontier scans with a single-pass BFS/Dijkstra nearest-frontier search.
 - [ ] Reduce ASCII render complexity from per-cell entity scanning to an `O(MapCells + Entities)` pass (spatial lookup or per-entity overlay pass).
 **Exit Criteria:**

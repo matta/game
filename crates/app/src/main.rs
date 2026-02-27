@@ -1,6 +1,5 @@
 use app::{
-    app_loop::{AppMode, AppState, RunCompletion},
-    engine_failure_code, format_seed, format_snapshot_hash, reason_code,
+    app_loop::{AppCompletion, AppMode, AppState},
     seed::{generate_runtime_seed, resolve_seed_from_args},
 };
 use core::{ContentPack, Game, GameMode, Interrupt, LogEvent, Pos, TileKind};
@@ -26,24 +25,30 @@ struct LayoutNodes {
 fn setup_layout(taffy: &mut TaffyTree<()>) -> LayoutNodes {
     let status = taffy
         .new_leaf(Style {
-            size: Size { width: percent(1.0), height: length(30.0) },
+            size: Size { width: percent(1.0), height: length(40.0) },
             margin: taffy::Rect { left: zero(), right: zero(), top: zero(), bottom: length(20.0) },
             ..Default::default()
         })
         .unwrap();
     let map = taffy
         .new_leaf(Style {
-            size: Size { width: percent(1.0), height: length(260.0) },
+            flex_grow: 1.0,
             margin: taffy::Rect { left: zero(), right: zero(), top: zero(), bottom: length(20.0) },
             ..Default::default()
         })
         .unwrap();
-    let stats = taffy.new_leaf(Style { flex_grow: 1.0, ..Default::default() }).unwrap();
-    let policy = taffy.new_leaf(Style { flex_grow: 1.2, ..Default::default() }).unwrap();
+    let stats = taffy.new_leaf(Style { flex_grow: 1.8, ..Default::default() }).unwrap();
+    let policy = taffy
+        .new_leaf(Style {
+            flex_grow: 1.1,
+            margin: taffy::Rect { left: length(15.0), right: zero(), top: zero(), bottom: zero() },
+            ..Default::default()
+        })
+        .unwrap();
     let threat = taffy
         .new_leaf(Style {
             flex_grow: 1.0,
-            margin: taffy::Rect { left: length(20.0), right: zero(), top: zero(), bottom: zero() },
+            margin: taffy::Rect { left: length(15.0), right: zero(), top: zero(), bottom: zero() },
             ..Default::default()
         })
         .unwrap();
@@ -52,8 +57,8 @@ fn setup_layout(taffy: &mut TaffyTree<()>) -> LayoutNodes {
             Style {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Row,
-                size: Size { width: percent(1.0), height: percent(1.0) },
-                flex_grow: 1.0,
+                size: Size { width: percent(1.0), height: length(240.0) },
+                flex_grow: 0.0,
                 ..Default::default()
             },
             &[stats, policy, threat],
@@ -64,10 +69,10 @@ fn setup_layout(taffy: &mut TaffyTree<()>) -> LayoutNodes {
             Style {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.5,
+                flex_grow: 2.0,
                 margin: taffy::Rect {
                     left: zero(),
-                    right: length(40.0),
+                    right: length(20.0),
                     top: zero(),
                     bottom: zero(),
                 },
@@ -76,13 +81,19 @@ fn setup_layout(taffy: &mut TaffyTree<()>) -> LayoutNodes {
             &[map, bottom_info],
         )
         .unwrap();
-    let event_log = taffy.new_leaf(Style { flex_grow: 1.0, ..Default::default() }).unwrap();
+    let event_log = taffy
+        .new_leaf(Style {
+            flex_grow: 1.0,
+            margin: taffy::Rect { left: length(20.0), right: zero(), top: zero(), bottom: zero() },
+            ..Default::default()
+        })
+        .unwrap();
     let main_row = taffy
         .new_with_children(
             Style {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Row,
-                size: Size { width: percent(1.0), height: auto() },
+                size: Size { width: percent(1.0), height: percent(1.0) },
                 flex_grow: 1.0,
                 ..Default::default()
             },
@@ -276,115 +287,142 @@ async fn main() {
         );
 
         let line_height = 18.0;
+        let pad_x = 15.0;
+        let pad_y = 25.0;
 
-        draw_ascii_map(&game, pos_map.0, pos_map.1, line_height);
-        draw_event_log(&game, pos_event.0, pos_event.1, line_height);
+        draw_ascii_map(&game, pos_map.0 + pad_x, pos_map.1, line_height);
+        draw_event_log(&game, pos_event.0 + pad_x, pos_event.1, line_height);
 
-        let status = match app_state.mode {
-            AppMode::PendingPrompt { ref interrupt, .. } => prompt_text(interrupt),
-            AppMode::Finished(ref completion) => match completion {
-                RunCompletion::Normal(outcome) => {
-                    format!("Finished: {}", reason_code(outcome))
-                }
-                RunCompletion::EngineFailure(reason) => {
-                    format!("Engine Failure: {}", engine_failure_code(reason))
-                }
-            },
+        let status = match &app_state.mode {
+            AppMode::PendingPrompt { interrupt, .. } => prompt_text(interrupt),
+            AppMode::Finished(completion) => {
+                format!("Finished: {}", completion_reason_code(completion.clone()))
+            }
             AppMode::AutoPlay => "Auto-Explore ON (Space to pause)".to_string(),
             AppMode::Paused => "Paused (Space to Auto-Explore, Right to step)".to_string(),
         };
-        draw_text(&status, pos_status.0, pos_status.1 + 20.0, 20.0, WHITE);
+        draw_text(&status, pos_status.0 + pad_x, pos_status.1 + pad_y, 20.0, WHITE);
 
-        let mut stats_y = pos_stats.1 + 20.0;
-        let p_x = pos_stats.0;
-        draw_text(&format!("Tick: {}", game.current_tick()), p_x, stats_y, 20.0, WHITE);
-        stats_y += 20.0;
-        draw_text(&format!("Seed: {}", format_seed(run_seed)), p_x, stats_y, 20.0, WHITE);
-        stats_y += 20.0;
-        draw_text(
-            &format!("Hash: {}", format_snapshot_hash(game.snapshot_hash())),
-            p_x,
-            stats_y,
-            20.0,
-            WHITE,
-        );
-        stats_y += 20.0;
-        draw_text(&format!("Floor: {} / 5", game.state().floor_index), p_x, stats_y, 20.0, WHITE);
-        stats_y += 20.0;
-        draw_text(&format!("Branch: {:?}", game.state().branch_profile), p_x, stats_y, 20.0, WHITE);
-        stats_y += 20.0;
-        draw_text(&format!("God: {:?}", game.state().active_god), p_x, stats_y, 20.0, WHITE);
-        stats_y += 20.0;
-
-        let intent_text = if let Some(intent) = game.state().auto_intent {
-            format!(
-                "Intent: {:?} target=({}, {}) path_len={}",
-                intent.reason, intent.target.x, intent.target.y, intent.path_len
-            )
+        let mut stats_y = pos_stats.1 + pad_y;
+        let p_x = pos_stats.0 + pad_x;
+        if let AppMode::Finished(completion) = &app_state.mode {
+            let recap_lines = build_finished_recap_lines(&game, run_seed, completion.clone());
+            for line in recap_lines {
+                draw_text(&line, p_x, stats_y, 20.0, WHITE);
+                stats_y += 20.0;
+            }
         } else {
-            "Intent: none".to_string()
-        };
-        draw_text(&intent_text, p_x, stats_y, 20.0, WHITE);
+            draw_text(&format!("Tick: {}", game.current_tick()), p_x, stats_y, 20.0, WHITE);
+            stats_y += 20.0;
+            draw_text(&format!("Seed: {run_seed}"), p_x, stats_y, 20.0, WHITE);
+            stats_y += 20.0;
+            draw_text(
+                &format!("Floor: {} / 5", game.state().floor_index),
+                p_x,
+                stats_y,
+                20.0,
+                WHITE,
+            );
+            stats_y += 20.0;
+            draw_text(
+                &format!("Branch: {:?}", game.state().branch_profile),
+                p_x,
+                stats_y,
+                20.0,
+                WHITE,
+            );
+            stats_y += 20.0;
+            draw_text(&format!("God: {:?}", game.state().active_god), p_x, stats_y, 20.0, WHITE);
+            stats_y += 20.0;
+            draw_text(
+                &format!("Hash: {}", format_snapshot_hash(game.snapshot_hash())),
+                p_x,
+                stats_y,
+                20.0,
+                WHITE,
+            );
+            stats_y += 20.0;
+
+            let intent_text = if let Some(intent) = game.state().auto_intent {
+                format!(
+                    "Intent: {:?} target=({}, {}) path_len={}",
+                    intent.reason, intent.target.x, intent.target.y, intent.path_len
+                )
+            } else {
+                "Intent: none".to_string()
+            };
+            draw_text(&intent_text, p_x, stats_y, 20.0, WHITE);
+        }
 
         let policy = &game.state().policy;
-        let mut pol_y = pos_policy.1 + 20.0;
-        let pol_x = pos_policy.0;
-        draw_text("Policy: ", pol_x, pol_y, 20.0, YELLOW);
-        pol_y += 20.0;
-        draw_text(&format!("[M]ode: {:?}", policy.fight_or_avoid), pol_x, pol_y, 18.0, LIGHTGRAY);
-        pol_y += 20.0;
-        draw_text(&format!("s[T]ance: {:?}", policy.stance), pol_x, pol_y, 18.0, LIGHTGRAY);
-        pol_y += 20.0;
-        draw_text(
-            &format!("[P]riority: {:?}", policy.target_priority),
-            pol_x,
-            pol_y,
-            18.0,
-            LIGHTGRAY,
-        );
-        pol_y += 20.0;
-        draw_text(
-            &format!("[R]etreat HP: {}%", policy.retreat_hp_threshold),
-            pol_x,
-            pol_y,
-            18.0,
-            LIGHTGRAY,
-        );
-        pol_y += 20.0;
-        draw_text(
-            &format!("[H]eal: {:?}", policy.auto_heal_if_below_threshold),
-            pol_x,
-            pol_y,
-            18.0,
-            LIGHTGRAY,
-        );
-        pol_y += 20.0;
-        draw_text(
-            &format!("[I]ntent: {:?}", policy.position_intent),
-            pol_x,
-            pol_y,
-            18.0,
-            LIGHTGRAY,
-        );
-        pol_y += 20.0;
-        draw_text(
-            &format!("[E]xplore: {:?}", policy.exploration_mode),
-            pol_x,
-            pol_y,
-            18.0,
-            LIGHTGRAY,
-        );
-        pol_y += 20.0;
-        draw_text(
-            &format!("[G]reed: {:?}", policy.resource_aggression),
-            pol_x,
-            pol_y,
-            18.0,
-            LIGHTGRAY,
-        );
+        let mut pol_y = pos_policy.1 + pad_y;
+        let pol_x = pos_policy.0 + pad_x;
+        if matches!(app_state.mode, AppMode::Finished(_)) {
+            draw_text("Policy: run ended", pol_x, pol_y, 20.0, YELLOW);
+        } else {
+            draw_text("Policy: ", pol_x, pol_y, 20.0, YELLOW);
+            pol_y += 20.0;
+            draw_text(
+                &format!("[M]ode: {:?}", policy.fight_or_avoid),
+                pol_x,
+                pol_y,
+                18.0,
+                LIGHTGRAY,
+            );
+            pol_y += 20.0;
+            draw_text(&format!("s[T]ance: {:?}", policy.stance), pol_x, pol_y, 18.0, LIGHTGRAY);
+            pol_y += 20.0;
+            draw_text(
+                &format!("[P]riority: {:?}", policy.target_priority),
+                pol_x,
+                pol_y,
+                18.0,
+                LIGHTGRAY,
+            );
+            pol_y += 20.0;
+            draw_text(
+                &format!("[R]etreat HP: {}%", policy.retreat_hp_threshold),
+                pol_x,
+                pol_y,
+                18.0,
+                LIGHTGRAY,
+            );
+            pol_y += 20.0;
+            draw_text(
+                &format!("[H]eal: {:?}", policy.auto_heal_if_below_threshold),
+                pol_x,
+                pol_y,
+                18.0,
+                LIGHTGRAY,
+            );
+            pol_y += 20.0;
+            draw_text(
+                &format!("[I]ntent: {:?}", policy.position_intent),
+                pol_x,
+                pol_y,
+                18.0,
+                LIGHTGRAY,
+            );
+            pol_y += 20.0;
+            draw_text(
+                &format!("[E]xplore: {:?}", policy.exploration_mode),
+                pol_x,
+                pol_y,
+                18.0,
+                LIGHTGRAY,
+            );
+            pol_y += 20.0;
+            draw_text(
+                &format!("[G]reed: {:?}", policy.resource_aggression),
+                pol_x,
+                pol_y,
+                18.0,
+                LIGHTGRAY,
+            );
+        }
 
-        let mut thr_y = pos_threat.1 + 20.0;
-        let thr_x = pos_threat.0;
+        let mut thr_y = pos_threat.1 + pad_y;
+        let thr_x = pos_threat.0 + pad_x;
         draw_text("Threat Trace:", thr_x, thr_y, 20.0, RED);
         thr_y += 20.0;
         for (i, trace) in game.state().threat_trace.iter().take(5).enumerate() {
@@ -533,4 +571,52 @@ fn auto_reason_text(reason: core::AutoReason) -> &'static str {
         core::AutoReason::Stuck => "Auto-explore is stuck.",
         core::AutoReason::Door => "Moving to open a door...",
     }
+}
+
+fn completion_reason_code(completion: AppCompletion) -> &'static str {
+    match completion {
+        AppCompletion::Outcome(core::RunOutcome::Victory) => "WIN_CLEAR",
+        AppCompletion::Outcome(core::RunOutcome::Defeat(core::DeathCause::Damage)) => "DMG_HP_ZERO",
+        AppCompletion::Outcome(core::RunOutcome::Defeat(core::DeathCause::Poison)) => "PSN_HP_ZERO",
+        AppCompletion::EngineFailure(core::EngineFailureReason::StalledNoProgress) => {
+            "ENG_STALLED_NO_PROGRESS"
+        }
+    }
+}
+
+fn format_snapshot_hash(hash: u64) -> String {
+    format!("{hash:#018x}")
+}
+
+fn build_finished_recap_lines(
+    game: &Game,
+    run_seed: u64,
+    completion: AppCompletion,
+) -> Vec<String> {
+    let mut lines = vec![
+        "Run recap:".to_string(),
+        format!("Reason: {}", completion_reason_code(completion)),
+        format!("Seed: {run_seed}"),
+        format!("Snapshot: {}", format_snapshot_hash(game.snapshot_hash())),
+        format!(
+            "Floor/Branch/God: {}/{:?}/{:?}",
+            game.state().floor_index,
+            game.state().branch_profile,
+            game.state().active_god
+        ),
+        format!("Tick: {}", game.current_tick()),
+        "Threat trace (latest 5):".to_string(),
+    ];
+
+    for trace in game.state().threat_trace.iter().take(5) {
+        lines.push(format!(
+            "T{} vis={} min_dist={:?} retreat={}",
+            trace.tick,
+            trace.visible_enemy_count,
+            trace.min_enemy_distance,
+            trace.retreat_triggered
+        ));
+    }
+
+    lines
 }
