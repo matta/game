@@ -750,9 +750,10 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Invariant stress testing is operational and wired into CI, protecting structural integrity continuously from future rapid prototyping and balance changes.
 
 ## Milestone 5 — Content Pass (15–18 hrs)
+- [ ] Implement topological floor generation: replace the placeholder MVP tunnel with random non-overlapping `Rect` room placement and deterministic corridor routing to create actual chokepoints.
+- [ ] 3–5 vault templates (e.g., Shrine rooms, Hazard corridors, Elite ambushes) stamped deterministically over the generated floors.
 - [ ] Populate `core::content`: ~15 items, ~10 perks, 2 gods.
 - [ ] 6–8 enemy types, 1 boss.
-- [ ] 3–5 vault templates.
 - [ ] **Weirdness Quota:** At least 5 items that modify rule systems (not just stat sticks). At least 3 perks that alter core mechanics (timing, targeting, economy).
 **Exit Criteria:**
 - **a) User Experience:** Substantial content density. The player encounters bosses, diverse enemies, and items with weird, rule-breaking properties, enabling wildly asymmetric build synergies.
