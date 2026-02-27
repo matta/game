@@ -26,6 +26,7 @@ pub struct GeneratedFloor {
     pub width: usize,
     pub height: usize,
     pub tiles: Vec<TileKind>,
+    pub hazards: Vec<bool>,
     pub entry_tile: Pos,
     pub down_stairs_tile: Pos,
     pub enemy_spawns: Vec<EnemySpawn>,
@@ -44,6 +45,9 @@ impl GeneratedFloor {
                 TileKind::ClosedDoor => 2,
                 TileKind::DownStairs => 3,
             });
+        }
+        for &h in &self.hazards {
+            bytes.push(u8::from(h));
         }
         bytes.extend(self.entry_tile.y.to_le_bytes());
         bytes.extend(self.entry_tile.x.to_le_bytes());
@@ -124,7 +128,12 @@ pub fn generate_floor(
         }
     }
 
-    let enemy_count = 2 + ((floor_index as usize).min(2));
+    // Branch A bonus: +1 enemy spawn attempt on floors after the starting floor.
+    let branch_enemy_bonus = match branch_profile {
+        BranchProfile::BranchA if floor_index > STARTING_FLOOR_INDEX => 1,
+        _ => 0,
+    };
+    let enemy_count = 2 + ((floor_index as usize).min(2)) + branch_enemy_bonus;
     let mut enemy_spawns = Vec::with_capacity(enemy_count);
     for enemy_index in 0..enemy_count {
         let x = 2 + (((floor_seed >> (enemy_index * 7 + 11)) as usize) % (width - 4));
@@ -138,6 +147,27 @@ pub fn generate_floor(
             enemy_spawns.push(EnemySpawn { kind: ActorKind::Goblin, pos });
         }
     }
+    if enemy_spawns.len() < enemy_count {
+        for y in 1..(height - 1) {
+            for x in 1..(width - 1) {
+                if enemy_spawns.len() >= enemy_count {
+                    break;
+                }
+                let pos = Pos { y: y as i32, x: x as i32 };
+                let tile = tiles[y * width + x];
+                if tile != TileKind::Floor {
+                    continue;
+                }
+                if pos == entry_tile
+                    || pos == down_stairs_tile
+                    || enemy_spawns.iter().any(|spawn| spawn.pos == pos)
+                {
+                    continue;
+                }
+                enemy_spawns.push(EnemySpawn { kind: ActorKind::Goblin, pos });
+            }
+        }
+    }
 
     let mut item_spawns = Vec::new();
     let item_target = Pos {
@@ -149,7 +179,32 @@ pub fn generate_floor(
         item_spawns.push(ItemSpawn { pos: item_pos });
     }
 
-    GeneratedFloor { width, height, tiles, entry_tile, down_stairs_tile, enemy_spawns, item_spawns }
+    // Branch B bonus: +3 hazard tiles on floors after the starting floor.
+    let mut hazards = vec![false; width * height];
+    let branch_hazard_count = match branch_profile {
+        BranchProfile::BranchB if floor_index > STARTING_FLOOR_INDEX => 3,
+        _ => 0,
+    };
+    for hazard_index in 0..branch_hazard_count {
+        let hx = 2 + (((floor_seed >> (hazard_index * 13 + 23)) as usize) % (width - 4));
+        let hy = 2 + (((floor_seed >> (hazard_index * 9 + 29)) as usize) % (height - 4));
+        let pos =
+            nearest_walkable_floor_tile(&tiles, width, height, Pos { y: hy as i32, x: hx as i32 });
+        if pos != entry_tile && pos != down_stairs_tile {
+            hazards[(pos.y as usize) * width + (pos.x as usize)] = true;
+        }
+    }
+
+    GeneratedFloor {
+        width,
+        height,
+        tiles,
+        hazards,
+        entry_tile,
+        down_stairs_tile,
+        enemy_spawns,
+        item_spawns,
+    }
 }
 
 fn derive_floor_seed(run_seed: u64, floor_index: u8, branch_profile: BranchProfile) -> u64 {
@@ -228,6 +283,47 @@ mod tests {
         let floor_1 = generate_floor(123_456, 1, BranchProfile::Uncommitted);
         let floor_2 = generate_floor(123_456, 2, BranchProfile::Uncommitted);
         assert_ne!(floor_1.canonical_bytes(), floor_2.canonical_bytes());
+    }
+
+    #[test]
+    fn same_seed_and_branch_produce_identical_floors_for_floor_two_and_three() {
+        let floor_2_a = generate_floor(88_001, 2, BranchProfile::BranchA);
+        let floor_2_b = generate_floor(88_001, 2, BranchProfile::BranchA);
+        let floor_3_a = generate_floor(88_001, 3, BranchProfile::BranchA);
+        let floor_3_b = generate_floor(88_001, 3, BranchProfile::BranchA);
+
+        assert_eq!(floor_2_a.canonical_bytes(), floor_2_b.canonical_bytes());
+        assert_eq!(floor_3_a.canonical_bytes(), floor_3_b.canonical_bytes());
+    }
+
+    #[test]
+    fn different_branches_change_floor_two_and_three_characteristics() {
+        let floor_2_a = generate_floor(77_777, 2, BranchProfile::BranchA);
+        let floor_2_b = generate_floor(77_777, 2, BranchProfile::BranchB);
+        let floor_3_a = generate_floor(77_777, 3, BranchProfile::BranchA);
+        let floor_3_b = generate_floor(77_777, 3, BranchProfile::BranchB);
+
+        let floor_2_a_hazards = floor_2_a.hazards.iter().filter(|&&h| h).count();
+        let floor_2_b_hazards = floor_2_b.hazards.iter().filter(|&&h| h).count();
+        let floor_3_a_hazards = floor_3_a.hazards.iter().filter(|&&h| h).count();
+        let floor_3_b_hazards = floor_3_b.hazards.iter().filter(|&&h| h).count();
+
+        assert!(
+            floor_2_a.enemy_spawns.len() > floor_2_b.enemy_spawns.len(),
+            "Branch A should increase floor 2 enemy density"
+        );
+        assert!(
+            floor_3_a.enemy_spawns.len() > floor_3_b.enemy_spawns.len(),
+            "Branch A should increase floor 3 enemy density"
+        );
+        assert!(
+            floor_2_b_hazards > floor_2_a_hazards,
+            "Branch B should increase floor 2 hazard density"
+        );
+        assert!(
+            floor_3_b_hazards > floor_3_a_hazards,
+            "Branch B should increase floor 3 hazard density"
+        );
     }
 
     #[test]

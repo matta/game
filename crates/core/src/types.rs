@@ -38,6 +38,8 @@ pub enum Choice {
     Avoid,
     OpenDoor,
     Descend,
+    DescendBranchA,
+    DescendBranchB,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +89,7 @@ pub enum Interrupt {
         prompt_id: ChoicePromptId,
         current_floor: u8,
         next_floor: Option<u8>,
+        requires_branch_choice: bool,
     },
 }
 

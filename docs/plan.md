@@ -694,16 +694,16 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Transition behavior is explicit and regression-tested, avoiding hidden floor-state coupling.
 
 ### Milestone 4c — Branch Choice + Persistent Branch Profile (3–4 hrs)
-- [ ] Introduce exactly one MVP branch commitment point: branch prompt appears on first descent only (floor 1 -> floor 2 transition). Merge the branch selection prompt directly into the descent interrupt to avoid back-to-back modal popups (mitigating Interrupt Fatigue).
-- [ ] Define two fixed branch profiles for MVP and freeze their modifiers:
-- [ ] `Branch A`: increases enemy density on floors 2–3 (`+1` enemy group spawn attempt per floor).
-- [ ] `Branch B`: increases hazard density on floors 2–3 (`+3` hazard tiles per floor, deterministic placement rules).
-- [ ] Persist branch commitment in run state and thread it into deterministic floor generation for all subsequent floors.
-- [ ] Issue a checkpoint marker on Branch Commitment, but omit per-level checkpoints to preserve tension and mitigate the Emotional Dilution risk.
-- [ ] Ensure branch prompt is emitted exactly once per run and never re-offered after commitment.
-- [ ] Add unit test: same seed + same branch => identical floor 2/3 generation.
-- [ ] Add unit test: same seed + different branch => measurable deterministic difference in floor 2/3 spawn/hazard outputs.
-- [ ] Add integration test: branch prompt appears at the intended transition and branch choice changes later floor characteristics.
+- [x] Introduce exactly one MVP branch commitment point: branch prompt appears on first descent only (floor 1 -> floor 2 transition). Merge the branch selection prompt directly into the descent interrupt to avoid back-to-back modal popups (mitigating Interrupt Fatigue).
+- [x] Define two fixed branch profiles for MVP and freeze their modifiers:
+- [x] `Branch A`: increases enemy density on floors 2–3 (`+1` enemy group spawn attempt per floor).
+- [x] `Branch B`: increases hazard density on floors 2–3 (`+3` hazard tiles per floor, deterministic placement rules).
+- [x] Persist branch commitment in run state and thread it into deterministic floor generation for all subsequent floors.
+- [ ] Issue a checkpoint marker on Branch Commitment, but omit per-level checkpoints to preserve tension and mitigate the Emotional Dilution risk. Deferred to Milestone 6 journal/checkpoint implementation.
+- [x] Ensure branch prompt is emitted exactly once per run and never re-offered after commitment.
+- [x] Add unit test: same seed + same branch => identical floor 2/3 generation.
+- [x] Add unit test: same seed + different branch => measurable deterministic difference in floor 2/3 spawn/hazard outputs.
+- [x] Add integration test: branch prompt appears at the intended transition and branch choice changes later floor characteristics.
 **Pass 4c Exit Criteria:**
 - **a) User Experience:** The player makes a meaningful branch decision that visibly changes upcoming floors.
 - **b) Progress toward vision:** Delivers branching dungeon structure in MVP scope without requiring overworld navigation.

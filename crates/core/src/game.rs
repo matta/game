@@ -25,6 +25,7 @@ enum PendingPromptKind {
     FloorTransition {
         current_floor: u8,
         next_floor: Option<u8>,
+        requires_branch_choice: bool,
     },
 }
 
@@ -419,9 +420,39 @@ impl Game {
                 );
                 true
             }
-            (PendingPromptKind::FloorTransition { current_floor, next_floor }, Choice::Descend) => {
+            (
+                PendingPromptKind::FloorTransition {
+                    current_floor,
+                    next_floor,
+                    requires_branch_choice,
+                },
+                choice,
+            ) if matches!(
+                choice,
+                Choice::Descend | Choice::DescendBranchA | Choice::DescendBranchB
+            ) =>
+            {
                 if self.state.floor_index != current_floor {
                     return Err(GameError::InvalidChoice);
+                }
+                if requires_branch_choice
+                    && !matches!(choice, Choice::DescendBranchA | Choice::DescendBranchB)
+                {
+                    return Err(GameError::InvalidChoice);
+                }
+                if !requires_branch_choice
+                    && matches!(choice, Choice::DescendBranchA | Choice::DescendBranchB)
+                {
+                    return Err(GameError::InvalidChoice);
+                }
+                match &choice {
+                    Choice::DescendBranchA => {
+                        self.state.branch_profile = BranchProfile::BranchA;
+                    }
+                    Choice::DescendBranchB => {
+                        self.state.branch_profile = BranchProfile::BranchB;
+                    }
+                    _ => {}
                 }
                 match next_floor {
                     Some(next_index) => self.descend_to_floor(next_index),
@@ -578,11 +609,15 @@ impl Game {
         } else {
             None
         };
+        let requires_branch_choice = self.state.floor_index == STARTING_FLOOR_INDEX
+            && self.state.branch_profile == BranchProfile::Uncommitted
+            && next_floor.is_some();
         let prompt = PendingPrompt {
             id: ChoicePromptId(self.next_input_seq),
             kind: PendingPromptKind::FloorTransition {
                 current_floor: self.state.floor_index,
                 next_floor,
+                requires_branch_choice,
             },
         };
         self.pending_prompt = Some(prompt.clone());
@@ -596,7 +631,7 @@ impl Game {
         let generated = generate_floor(self.seed, floor_index, self.state.branch_profile);
         let mut map = Map::new(generated.width, generated.height);
         map.tiles = generated.tiles;
-        map.hazards.fill(false);
+        map.hazards = generated.hazards;
 
         let player_id = self.state.player_id;
         self.state.actors.retain(|id, _| id == player_id);
@@ -653,9 +688,16 @@ impl Game {
             PendingPromptKind::DoorBlocked { pos } => {
                 Interrupt::DoorBlocked { prompt_id: prompt.id, pos }
             }
-            PendingPromptKind::FloorTransition { current_floor, next_floor } => {
-                Interrupt::FloorTransition { prompt_id: prompt.id, current_floor, next_floor }
-            }
+            PendingPromptKind::FloorTransition {
+                current_floor,
+                next_floor,
+                requires_branch_choice,
+            } => Interrupt::FloorTransition {
+                prompt_id: prompt.id,
+                current_floor,
+                next_floor,
+                requires_branch_choice,
+            },
         }
     }
     fn find_item_at(&self, pos: Pos) -> Option<ItemId> {
@@ -1267,11 +1309,18 @@ mod tests {
                     }
                     game.apply_choice(prompt_id, Choice::Fight).expect("fight choice should apply");
                 }
-                AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
-                    prompt_id, ..
-                }) => {
-                    game.apply_choice(prompt_id, Choice::Descend)
-                        .expect("descend choice should apply");
+                AdvanceStopReason::Interrupted(
+                    int @ Interrupt::FloorTransition { prompt_id, .. },
+                ) => {
+                    let choice = if matches!(
+                        int,
+                        Interrupt::FloorTransition { requires_branch_choice: true, .. }
+                    ) {
+                        Choice::DescendBranchA
+                    } else {
+                        Choice::Descend
+                    };
+                    game.apply_choice(prompt_id, choice).expect("descend choice should apply");
                 }
                 AdvanceStopReason::Finished(_) => break,
                 AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {
@@ -1299,16 +1348,19 @@ mod tests {
                 prompt_id,
                 current_floor,
                 next_floor,
+                requires_branch_choice,
             }) => {
                 assert_eq!(current_floor, 1);
                 assert_eq!(next_floor, Some(2));
+                assert!(requires_branch_choice, "first descent should require branch choice");
                 prompt_id
             }
             other => panic!("expected floor transition interrupt, got {other:?}"),
         };
 
-        game.apply_choice(prompt_id, Choice::Descend).expect("descend should apply");
+        game.apply_choice(prompt_id, Choice::DescendBranchA).expect("descend should apply");
         assert_eq!(game.state.floor_index, 2);
+        assert_eq!(game.state.branch_profile, BranchProfile::BranchA);
         assert_ne!(floor_one_tiles, game.state.map.tiles);
     }
 
@@ -1329,10 +1381,18 @@ mod tests {
                 AdvanceStopReason::Interrupted(Interrupt::DoorBlocked { prompt_id, .. }) => {
                     game.apply_choice(prompt_id, Choice::OpenDoor).expect("open door");
                 }
-                AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
-                    prompt_id, ..
-                }) => {
-                    game.apply_choice(prompt_id, Choice::Descend).expect("descend");
+                AdvanceStopReason::Interrupted(
+                    int @ Interrupt::FloorTransition { prompt_id, .. },
+                ) => {
+                    let choice = if matches!(
+                        int,
+                        Interrupt::FloorTransition { requires_branch_choice: true, .. }
+                    ) {
+                        Choice::DescendBranchA
+                    } else {
+                        Choice::Descend
+                    };
+                    game.apply_choice(prompt_id, choice).expect("descend");
                 }
                 AdvanceStopReason::Finished(_) => break,
                 AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {
@@ -1366,8 +1426,109 @@ mod tests {
         };
 
         assert_eq!(first_prompt, second_prompt);
-        game.apply_choice(first_prompt, Choice::Descend).expect("descend should apply");
+        game.apply_choice(first_prompt, Choice::DescendBranchA).expect("descend should apply");
         assert_eq!(game.state.floor_index, 2);
+    }
+
+    #[test]
+    fn branch_prompt_is_emitted_once_on_first_descent_only() {
+        let mut game = Game::new(51_515, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.state.actors[game.state.player_id].pos = Pos { y: 11, x: 13 };
+
+        let first_prompt = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                requires_branch_choice,
+                ..
+            }) => {
+                assert!(requires_branch_choice, "first descent should require branch choice");
+                prompt_id
+            }
+            other => panic!("expected first floor-transition prompt, got {other:?}"),
+        };
+        game.apply_choice(first_prompt, Choice::DescendBranchA).expect("select branch A");
+
+        let mut stairs = None;
+        for y in 0..game.state.map.internal_height {
+            for x in 0..game.state.map.internal_width {
+                let pos = Pos { y: y as i32, x: x as i32 };
+                if game.state.map.tile_at(pos) == TileKind::DownStairs {
+                    stairs = Some(pos);
+                    break;
+                }
+            }
+            if stairs.is_some() {
+                break;
+            }
+        }
+        let stairs = stairs.expect("floor 2 should have a stairs tile");
+        game.state.actors[game.state.player_id].pos = stairs;
+
+        match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                requires_branch_choice,
+                ..
+            }) => {
+                assert!(!requires_branch_choice, "branch choice should not reappear after commit");
+            }
+            other => panic!("expected second floor-transition prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn branch_choice_changes_later_floor_characteristics() {
+        let content = ContentPack::default();
+        let mut game_a = Game::new(42_424, &content, GameMode::Ironman);
+        let mut game_b = Game::new(42_424, &content, GameMode::Ironman);
+        for game in [&mut game_a, &mut game_b] {
+            game.state.items.clear();
+            game.state.actors.retain(|id, _| id == game.state.player_id);
+            game.state.actors[game.state.player_id].pos = Pos { y: 11, x: 13 };
+        }
+
+        let prompt_a = match game_a.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                requires_branch_choice,
+                ..
+            }) => {
+                assert!(requires_branch_choice);
+                prompt_id
+            }
+            other => panic!("expected branch prompt in game A, got {other:?}"),
+        };
+        let prompt_b = match game_b.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                requires_branch_choice,
+                ..
+            }) => {
+                assert!(requires_branch_choice);
+                prompt_id
+            }
+            other => panic!("expected branch prompt in game B, got {other:?}"),
+        };
+
+        game_a.apply_choice(prompt_a, Choice::DescendBranchA).expect("choose branch A");
+        game_b.apply_choice(prompt_b, Choice::DescendBranchB).expect("choose branch B");
+
+        let floor_a_enemy_count =
+            game_a.state.actors.iter().filter(|(id, _)| *id != game_a.state.player_id).count();
+        let floor_b_enemy_count =
+            game_b.state.actors.iter().filter(|(id, _)| *id != game_b.state.player_id).count();
+        let floor_a_hazard_count = game_a.state.map.hazards.iter().filter(|&&h| h).count();
+        let floor_b_hazard_count = game_b.state.map.hazards.iter().filter(|&&h| h).count();
+
+        assert!(
+            floor_a_enemy_count > floor_b_enemy_count,
+            "Branch A should create denser enemy floors"
+        );
+        assert!(
+            floor_b_hazard_count > floor_a_hazard_count,
+            "Branch B should create denser hazard floors"
+        );
     }
 
     #[test]

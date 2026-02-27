@@ -146,8 +146,20 @@ impl AppState {
                             self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
                         }
                     }
-                    Interrupt::FloorTransition { .. } => {
-                        if keys_pressed.contains(&KeyCode::C) {
+                    Interrupt::FloorTransition { requires_branch_choice, .. } => {
+                        if *requires_branch_choice {
+                            if keys_pressed.contains(&KeyCode::A) {
+                                game.apply_choice(id, core::Choice::DescendBranchA)
+                                    .expect("Failed to apply pending choice");
+                                self.mode =
+                                    if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                            } else if keys_pressed.contains(&KeyCode::B) {
+                                game.apply_choice(id, core::Choice::DescendBranchB)
+                                    .expect("Failed to apply pending choice");
+                                self.mode =
+                                    if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                            }
+                        } else if keys_pressed.contains(&KeyCode::C) {
                             game.apply_choice(id, core::Choice::Descend)
                                 .expect("Failed to apply pending choice");
                             self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };

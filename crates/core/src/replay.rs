@@ -119,6 +119,19 @@ mod tests {
 
     const MAX_TEST_RUN_LOOP_COUNT: usize = 512;
 
+    fn floor_transition_choice(interrupt: &crate::types::Interrupt) -> Choice {
+        match interrupt {
+            crate::types::Interrupt::FloorTransition { requires_branch_choice, .. } => {
+                if *requires_branch_choice {
+                    Choice::DescendBranchA
+                } else {
+                    Choice::Descend
+                }
+            }
+            _ => panic!("expected FloorTransition"),
+        }
+    }
+
     #[test]
     fn test_replay_policy_equivalence() {
         let content = ContentPack::default();
@@ -154,9 +167,10 @@ mod tests {
                         journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                         seq += 1;
                     }
-                    crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::Descend).unwrap();
-                        journal.append_choice(prompt_id, Choice::Descend, seq);
+                    int @ crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                        let choice = floor_transition_choice(&int);
+                        game1.apply_choice(prompt_id, choice.clone()).unwrap();
+                        journal.append_choice(prompt_id, choice, seq);
                         seq += 1;
                     }
                 },
@@ -219,9 +233,10 @@ mod tests {
                             journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                             seq += 1;
                         }
-                        crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
-                            game1.apply_choice(prompt_id, Choice::Descend).unwrap();
-                            journal.append_choice(prompt_id, Choice::Descend, seq);
+                        int @ crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                            let choice = floor_transition_choice(&int);
+                            game1.apply_choice(prompt_id, choice.clone()).unwrap();
+                            journal.append_choice(prompt_id, choice, seq);
                             seq += 1;
                         }
                     }
@@ -274,9 +289,10 @@ mod tests {
                         journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                         seq += 1;
                     }
-                    crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::Descend).unwrap();
-                        journal.append_choice(prompt_id, Choice::Descend, seq);
+                    int @ crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                        let choice = floor_transition_choice(&int);
+                        game1.apply_choice(prompt_id, choice.clone()).unwrap();
+                        journal.append_choice(prompt_id, choice, seq);
                         seq += 1;
                     }
                 },

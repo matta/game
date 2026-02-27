@@ -17,7 +17,14 @@ fn build_scripted_journal(seed: u64, content: &ContentPack) -> InputJournal {
                     Interrupt::LootFound { prompt_id, .. } => (prompt_id, Choice::KeepLoot),
                     Interrupt::EnemyEncounter { prompt_id, .. } => (prompt_id, Choice::Fight),
                     Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
-                    Interrupt::FloorTransition { prompt_id, .. } => (prompt_id, Choice::Descend),
+                    Interrupt::FloorTransition { prompt_id, requires_branch_choice, .. } => {
+                        let choice = if requires_branch_choice {
+                            Choice::DescendBranchA
+                        } else {
+                            Choice::Descend
+                        };
+                        (prompt_id, choice)
+                    }
                 };
                 journal.append_choice(prompt_id, choice.clone(), seq);
                 seq += 1;
@@ -86,10 +93,16 @@ fn test_deterministic_smoke_fixed_seed_stable_intent_and_log_sequence() {
                     trace.push("door".to_string());
                 }
                 AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
-                    prompt_id, ..
+                    prompt_id,
+                    requires_branch_choice,
+                    ..
                 }) => {
-                    game.apply_choice(prompt_id, Choice::Descend)
-                        .expect("descend choice should apply");
+                    let choice = if requires_branch_choice {
+                        Choice::DescendBranchA
+                    } else {
+                        Choice::Descend
+                    };
+                    game.apply_choice(prompt_id, choice).expect("descend choice should apply");
                     trace.push("descend".to_string());
                 }
                 _ => {}
@@ -135,8 +148,14 @@ fn test_starter_layout_auto_run_hits_door_and_threat_avoidance_within_250_ticks(
                 game.apply_choice(prompt_id, Choice::OpenDoor)
                     .expect("open door should apply during smoke run");
             }
-            AdvanceStopReason::Interrupted(Interrupt::FloorTransition { prompt_id, .. }) => {
-                game.apply_choice(prompt_id, Choice::Descend)
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                requires_branch_choice,
+                ..
+            }) => {
+                let choice =
+                    if requires_branch_choice { Choice::DescendBranchA } else { Choice::Descend };
+                game.apply_choice(prompt_id, choice)
                     .expect("descend should apply during smoke run");
             }
             _ => {}

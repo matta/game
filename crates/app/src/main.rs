@@ -23,6 +23,7 @@ async fn main() {
             KeyCode::D,
             KeyCode::F,
             KeyCode::A,
+            KeyCode::B,
             KeyCode::O,
             KeyCode::C,
             KeyCode::M,
@@ -207,10 +208,18 @@ fn prompt_text(interrupt: &Interrupt) -> String {
             format!("INTERRUPT: Enemy sighted (F=fight, A=avoid) Tags: {:?}", threat.danger_tags)
         }
         Interrupt::DoorBlocked { .. } => "INTERRUPT: Door blocked (O=open)".to_string(),
-        Interrupt::FloorTransition { next_floor, .. } => match next_floor {
-            Some(floor) => format!("INTERRUPT: Stairs reached (C=descend to floor {floor})"),
-            None => "INTERRUPT: Final stairs reached (C=finish run)".to_string(),
-        },
+        Interrupt::FloorTransition { next_floor, requires_branch_choice, .. } => {
+            if *requires_branch_choice {
+                "INTERRUPT: Stairs reached — choose branch (A=enemies, B=hazards)".to_string()
+            } else {
+                match next_floor {
+                    Some(floor) => {
+                        format!("INTERRUPT: Stairs reached (C=descend to floor {floor})")
+                    }
+                    None => "INTERRUPT: Final stairs reached (C=finish run)".to_string(),
+                }
+            }
+        }
     }
 }
 
