@@ -698,10 +698,13 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(128))]
-
+        #![proptest_config(ProptestConfig::with_cases(1024))]
         #[test]
-        fn generated_floors_keep_walkable_tiles_connected(seed in any::<u64>(), floor in 1_u8..=MAX_FLOORS, branch_selector in 0_u8..=2) {
+        fn generated_floors_keep_walkable_tiles_connected(
+            seed in any::<u64>(),
+            floor in 1_u8..=MAX_FLOORS,
+            branch_selector in 0_u8..=2
+        ) {
             let branch = match branch_selector {
                 0 => BranchProfile::Uncommitted,
                 1 => BranchProfile::BranchA,
