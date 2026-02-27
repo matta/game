@@ -154,6 +154,8 @@ pub struct GameState {
     pub actors: SlotMap<EntityId, Actor>,
     pub items: SlotMap<ItemId, Item>,
     pub player_id: EntityId,
+    pub sanctuary_tile: Pos,
+    pub sanctuary_active: bool,
     pub floor_index: u8,
     pub branch_profile: BranchProfile,
     pub auto_intent: Option<AutoExploreIntent>,

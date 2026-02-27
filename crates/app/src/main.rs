@@ -3,8 +3,21 @@ use macroquad::prelude::*;
 
 #[macroquad::main("Roguelike")]
 async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let generated_seed = app::seed::generate_runtime_seed();
+    let selected_seed = match app::seed::resolve_seed_from_args(&args, generated_seed) {
+        Ok(seed_choice) => seed_choice,
+        Err(message) => {
+            let program_name = args.first().map_or("game", String::as_str);
+            eprintln!("Error: {message}");
+            eprintln!("Usage: {program_name} [--seed <u64>]");
+            std::process::exit(2);
+        }
+    };
+    let run_seed = selected_seed.value();
+
     let content = ContentPack::default();
-    let mut game = Game::new(12345, &content, GameMode::Ironman);
+    let mut game = Game::new(run_seed, &content, GameMode::Ironman);
 
     let mut app_state = app::app_loop::AppState::default();
 
@@ -59,6 +72,7 @@ async fn main() {
         };
         draw_text(&status, 20.0, 30.0, 20.0, WHITE);
         draw_text(&format!("Tick: {}", game.current_tick()), 20.0, 350.0, 20.0, WHITE);
+        draw_text(&format!("Seed: {run_seed}"), 20.0, 330.0, 20.0, WHITE);
 
         let intent_text = if let Some(intent) = game.state().auto_intent {
             format!(

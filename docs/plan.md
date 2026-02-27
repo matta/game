@@ -710,14 +710,14 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Branch effects are explicit, bounded, and deterministic rather than ad-hoc map mutations.
 
 ### Milestone 4d — Floor Safety/Retreat Guarantees + Spawn Rules (1–2 hrs)
-- [ ] Implement stair-adjacent sanctuary spawn rule per floor transition: no enemy can spawn on entry tile or immediate adjacent tiles.
-- [ ] Implement runtime sanctuary rule: enemies treat the stair/'entry' tile as strictly non-walkable during A* and neighbor expansion.
-- [ ] Implement encounter-reset logic: if the player flees onto a sanctuary tile, purge the active threat state and transition out of combat mode.
-- [ ] Ensure down-stairs tile is never blocked by walls, hazards, or enemy spawn occupancy at generation time.
-- [ ] Add deterministic spawn ordering/tie-break rules for per-floor actor placement to prevent cross-platform drift.
-- [ ] Add unit test: sanctuary rule holds across generated floors for multiple fixed seeds.
-- [ ] Add unit test: stairs tile remains reachable and unoccupied at floor start.
-- [ ] Add unit test: enemies cannot pathfind onto the sanctuary tile even if the player is standing on it.
+- [x] Implement stair-adjacent sanctuary spawn rule per floor transition: no enemy can spawn on entry tile or immediate adjacent tiles.
+- [x] Implement runtime sanctuary rule: enemies treat the stair/'entry' tile as strictly non-walkable during A* and neighbor expansion.
+- [x] Implement encounter-reset logic: if the player flees onto a sanctuary tile, purge the active threat state and transition out of combat mode.
+- [x] Ensure down-stairs tile is never blocked by walls, hazards, or enemy spawn occupancy at generation time.
+- [x] Add deterministic spawn ordering/tie-break rules for per-floor actor placement to prevent cross-platform drift.
+- [x] Add unit test: sanctuary rule holds across generated floors for multiple fixed seeds.
+- [x] Add unit test: stairs tile remains reachable and unoccupied at floor start.
+- [x] Add unit test: enemies cannot pathfind onto the sanctuary tile even if the player is standing on it.
 **Pass 4d Exit Criteria:**
 - **a) User Experience:** Entering a new floor feels fair; the player gets a stable foothold instead of immediate unavoidable collapse.
 - **b) Progress toward vision:** Supports lethal-but-fair pacing while preserving forward progression.

@@ -200,6 +200,8 @@ impl Game {
                 actors,
                 items,
                 player_id,
+                sanctuary_tile: Pos { y: 5, x: 4 },
+                sanctuary_active: false,
                 floor_index: STARTING_FLOOR_INDEX,
                 branch_profile: BranchProfile::Uncommitted,
                 auto_intent: None,
@@ -247,11 +249,15 @@ impl Game {
             if self.state.map.tile_at(player_pos) == TileKind::DownStairs {
                 return self.interrupt_floor_transition(steps);
             }
-            self.clear_stale_suppressed_enemy(player_pos);
-            let adjacent = self.find_adjacent_enemy_ids(player_pos);
-            if let Some(primary_enemy) = adjacent.first().copied() {
-                self.log.push(LogEvent::EnemyEncountered { enemy: primary_enemy });
-                return self.interrupt_enemy(adjacent, primary_enemy, steps);
+            if self.state.sanctuary_active && player_pos == self.state.sanctuary_tile {
+                self.suppressed_enemy = None;
+            } else {
+                self.clear_stale_suppressed_enemy(player_pos);
+                let adjacent = self.find_adjacent_enemy_ids(player_pos);
+                if let Some(primary_enemy) = adjacent.first().copied() {
+                    self.log.push(LogEvent::EnemyEncountered { enemy: primary_enemy });
+                    return self.interrupt_enemy(adjacent, primary_enemy, steps);
+                }
             }
             if let Some(item_id) = self.find_item_at(player_pos) {
                 return self.interrupt_loot(item_id, steps);
@@ -524,6 +530,9 @@ impl Game {
         let player = &self.state.actors[self.state.player_id];
         hasher.write_i32(player.pos.x);
         hasher.write_i32(player.pos.y);
+        hasher.write_i32(self.state.sanctuary_tile.x);
+        hasher.write_i32(self.state.sanctuary_tile.y);
+        hasher.write_u8(u8::from(self.state.sanctuary_active));
         if let Some(intent) = self.state.auto_intent {
             hasher.write_i32(intent.target.x);
             hasher.write_i32(intent.target.y);
@@ -664,6 +673,8 @@ impl Game {
         compute_fov(&mut map, generated.entry_tile, FOV_RADIUS);
 
         self.state.map = map;
+        self.state.sanctuary_tile = generated.entry_tile;
+        self.state.sanctuary_active = true;
         self.state.floor_index = floor_index;
         self.state.auto_intent = None;
         self.suppressed_enemy = None;
@@ -708,6 +719,13 @@ impl Game {
             .state
             .actors
             .iter()
+            .filter(|(id, actor)| {
+                if *id == self.state.player_id {
+                    return false;
+                }
+                let sanctuary = self.state.sanctuary_active.then_some(self.state.sanctuary_tile);
+                enemy_path_to_player(&self.state.map, actor.pos, pos, sanctuary).is_some()
+            })
             .filter(|(id, actor)| {
                 Some(*id) != self.suppressed_enemy
                     && *id != self.state.player_id
@@ -909,15 +927,34 @@ fn path_for_intent(map: &Map, start: Pos, intent: AutoExploreIntent) -> Option<V
 }
 
 fn astar_path(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
-    astar_path_internal(map, start, goal, true)
+    astar_path_internal(map, start, goal, true, None, true)
 }
 
 fn astar_path_allow_hazards(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
-    astar_path_internal(map, start, goal, false)
+    astar_path_internal(map, start, goal, false, None, true)
 }
 
-fn astar_path_internal(map: &Map, start: Pos, goal: Pos, avoid_hazards: bool) -> Option<Vec<Pos>> {
+fn enemy_path_to_player(
+    map: &Map,
+    enemy_pos: Pos,
+    player_pos: Pos,
+    sanctuary_tile: Option<Pos>,
+) -> Option<Vec<Pos>> {
+    astar_path_internal(map, enemy_pos, player_pos, false, sanctuary_tile, false)
+}
+
+fn astar_path_internal(
+    map: &Map,
+    start: Pos,
+    goal: Pos,
+    avoid_hazards: bool,
+    blocked_tile: Option<Pos>,
+    allow_goal_on_blocked_tile: bool,
+) -> Option<Vec<Pos>> {
     if !map.is_discovered_walkable(start) || !map.is_discovered_walkable(goal) {
+        return None;
+    }
+    if blocked_tile.is_some_and(|blocked| blocked == goal && !allow_goal_on_blocked_tile) {
         return None;
     }
     if start == goal {
@@ -935,8 +972,15 @@ fn astar_path_internal(map: &Map, start: Pos, goal: Pos, avoid_hazards: bool) ->
             return Some(reconstruct_path(&came_from, start, goal));
         }
         let cur_g = *g_score.get(&p).unwrap();
-        for n in neighbors(p) {
-            if !is_astar_step_walkable(map, n, goal, avoid_hazards) {
+        for n in neighbors_for_astar(p, blocked_tile) {
+            if !is_astar_step_walkable(
+                map,
+                n,
+                goal,
+                avoid_hazards,
+                blocked_tile,
+                allow_goal_on_blocked_tile,
+            ) {
                 continue;
             }
             let tg = cur_g + 1;
@@ -951,7 +995,19 @@ fn astar_path_internal(map: &Map, start: Pos, goal: Pos, avoid_hazards: bool) ->
     None
 }
 
-fn is_astar_step_walkable(map: &Map, pos: Pos, goal: Pos, avoid_hazards: bool) -> bool {
+fn is_astar_step_walkable(
+    map: &Map,
+    pos: Pos,
+    goal: Pos,
+    avoid_hazards: bool,
+    blocked_tile: Option<Pos>,
+    allow_goal_on_blocked_tile: bool,
+) -> bool {
+    if blocked_tile
+        .is_some_and(|blocked| blocked == pos && (pos != goal || !allow_goal_on_blocked_tile))
+    {
+        return false;
+    }
     if !map.is_discovered_walkable(pos) {
         return false;
     }
@@ -963,6 +1019,10 @@ fn is_astar_step_walkable(map: &Map, pos: Pos, goal: Pos, avoid_hazards: bool) -
         return false;
     }
     true
+}
+
+fn neighbors_for_astar(p: Pos, blocked_tile: Option<Pos>) -> Vec<Pos> {
+    neighbors(p).into_iter().filter(|next| Some(*next) != blocked_tile).collect()
 }
 
 fn reconstruct_path(came: &BTreeMap<Pos, Pos>, start: Pos, goal: Pos) -> Vec<Pos> {
@@ -2329,6 +2389,51 @@ mod tests {
         game.state.actors[game.state.player_id].pos = Pos { y: player.y - 1, x: player.x - 1 };
         let _ = game.advance(1);
         assert_eq!(game.suppressed_enemy, None);
+    }
+
+    #[test]
+    fn enemies_do_not_interrupt_when_player_is_on_sanctuary_tile() {
+        let mut game = Game::new(12345, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let sanctuary = game.state.sanctuary_tile;
+        let player = game.state.player_id;
+        game.state.sanctuary_active = true;
+        game.state.actors[player].pos = sanctuary;
+        let _enemy = add_goblin(&mut game, Pos { y: sanctuary.y, x: sanctuary.x + 1 });
+        game.suppressed_enemy = Some(EntityId::default());
+
+        let result = game.advance(1);
+        assert!(
+            !matches!(
+                result.stop_reason,
+                AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { .. })
+            ),
+            "enemy encounter should be suppressed on sanctuary tile"
+        );
+        assert_eq!(game.suppressed_enemy, None, "sanctuary should purge stale threat state");
+    }
+
+    #[test]
+    fn enemy_pathfinding_cannot_step_onto_sanctuary_tile() {
+        let mut map = Map::new(10, 7);
+        for y in 1..6 {
+            for x in 1..9 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        map.discovered.fill(true);
+
+        let enemy_pos = Pos { y: 3, x: 6 };
+        let sanctuary = Pos { y: 3, x: 4 };
+        let player_on_sanctuary = sanctuary;
+
+        let path = enemy_path_to_player(&map, enemy_pos, player_on_sanctuary, Some(sanctuary));
+        assert!(
+            path.is_none(),
+            "enemy A* should treat sanctuary as non-walkable even when the player stands on it"
+        );
     }
 
     #[test]

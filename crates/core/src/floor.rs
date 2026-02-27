@@ -105,9 +105,6 @@ pub fn generate_floor(
     for x in 1..(width - 1) {
         tiles[tunnel_y * width + x] = TileKind::Floor;
     }
-    tiles[(down_stairs_tile.y as usize) * width + (down_stairs_tile.x as usize)] =
-        TileKind::DownStairs;
-
     // Add deterministic side pockets to avoid every floor feeling identical.
     let pocket_count = 3 + (floor_index as usize % 2);
     for pocket_index in 0..pocket_count {
@@ -140,7 +137,7 @@ pub fn generate_floor(
         let y = 2 + (((floor_seed >> (enemy_index * 11 + 17)) as usize) % (height - 4));
         let pos =
             nearest_walkable_floor_tile(&tiles, width, height, Pos { y: y as i32, x: x as i32 });
-        if pos != entry_tile
+        if manhattan(pos, entry_tile) > 1
             && pos != down_stairs_tile
             && !enemy_spawns.iter().any(|spawn: &EnemySpawn| spawn.pos == pos)
         {
@@ -158,7 +155,7 @@ pub fn generate_floor(
                 if tile != TileKind::Floor {
                     continue;
                 }
-                if pos == entry_tile
+                if manhattan(pos, entry_tile) <= 1
                     || pos == down_stairs_tile
                     || enemy_spawns.iter().any(|spawn| spawn.pos == pos)
                 {
@@ -168,6 +165,7 @@ pub fn generate_floor(
             }
         }
     }
+    enemy_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x, spawn.kind));
 
     let mut item_spawns = Vec::new();
     let item_target = Pos {
@@ -178,6 +176,7 @@ pub fn generate_floor(
     if item_pos != entry_tile && item_pos != down_stairs_tile {
         item_spawns.push(ItemSpawn { pos: item_pos });
     }
+    item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x));
 
     // Branch B bonus: +3 hazard tiles on floors after the starting floor.
     let mut hazards = vec![false; width * height];
@@ -194,6 +193,9 @@ pub fn generate_floor(
             hazards[(pos.y as usize) * width + (pos.x as usize)] = true;
         }
     }
+    tiles[(down_stairs_tile.y as usize) * width + (down_stairs_tile.x as usize)] =
+        TileKind::DownStairs;
+    hazards[(down_stairs_tile.y as usize) * width + (down_stairs_tile.x as usize)] = false;
 
     GeneratedFloor {
         width,
@@ -259,6 +261,10 @@ fn nearest_walkable_floor_tile(
 
 fn in_bounds(width: usize, height: usize, pos: Pos) -> bool {
     pos.x >= 0 && pos.y >= 0 && (pos.x as usize) < width && (pos.y as usize) < height
+}
+
+fn manhattan(a: Pos, b: Pos) -> u32 {
+    a.x.abs_diff(b.x) + a.y.abs_diff(b.y)
 }
 
 fn tile_at(tiles: &[TileKind], width: usize, pos: Pos) -> TileKind {
@@ -333,6 +339,52 @@ mod tests {
             has_walkable_route(&generated, generated.entry_tile, generated.down_stairs_tile),
             "generated floor should always have a walkable route from entry to stairs"
         );
+    }
+
+    #[test]
+    fn sanctuary_spawn_rule_holds_across_multiple_seeds_and_floors() {
+        let seeds = [11_u64, 2_024, 77_777, 909_090];
+        for seed in seeds {
+            for floor in 2..=MAX_FLOORS {
+                let generated = generate_floor(seed, floor, BranchProfile::BranchA);
+                for spawn in &generated.enemy_spawns {
+                    assert!(
+                        manhattan(spawn.pos, generated.entry_tile) > 1,
+                        "enemy spawn {:?} must not be on or adjacent to sanctuary {:?} (seed={seed}, floor={floor})",
+                        spawn.pos,
+                        generated.entry_tile
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn downstairs_tile_is_reachable_non_hazard_and_unoccupied_at_floor_start() {
+        let seeds = [123_u64, 456, 789, 10_111];
+        for seed in seeds {
+            let generated = generate_floor(seed, 2, BranchProfile::BranchB);
+            assert_eq!(
+                generated.tile_at(generated.down_stairs_tile),
+                TileKind::DownStairs,
+                "stairs tile type should remain DownStairs"
+            );
+            let stairs_index = (generated.down_stairs_tile.y as usize) * generated.width
+                + (generated.down_stairs_tile.x as usize);
+            assert!(!generated.hazards[stairs_index], "stairs tile must not start hazardous");
+            assert!(
+                !generated.enemy_spawns.iter().any(|spawn| spawn.pos == generated.down_stairs_tile),
+                "stairs tile must not start occupied by an enemy"
+            );
+            assert!(
+                has_walkable_route(&generated, generated.entry_tile, generated.down_stairs_tile),
+                "stairs must be reachable from entry"
+            );
+        }
+    }
+
+    fn manhattan(a: Pos, b: Pos) -> u32 {
+        a.x.abs_diff(b.x) + a.y.abs_diff(b.y)
     }
 
     fn has_walkable_route(generated: &GeneratedFloor, start: Pos, goal: Pos) -> bool {
