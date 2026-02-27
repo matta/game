@@ -2,7 +2,7 @@
 
 This plan outlines the steps for optimizing the auto-explore planner in the `core` simulation crate by replacing expensive A* searches with efficient single-source BFS/Dijkstra passes.
 
-## Phase 1: Preparation & Regression Baseline
+## Phase 1: Preparation & Regression Baseline [checkpoint: c5ced57]
 
 Ensure a stable baseline and robust regression tests are in place to verify the new planner's behavioral consistency.
 
