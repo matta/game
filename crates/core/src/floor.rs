@@ -86,6 +86,55 @@ impl GeneratedFloor {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RoomRect {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+}
+
+impl RoomRect {
+    fn right(self) -> usize {
+        self.x + self.width - 1
+    }
+
+    fn bottom(self) -> usize {
+        self.y + self.height - 1
+    }
+
+    fn center(self) -> Pos {
+        Pos { y: (self.y + (self.height / 2)) as i32, x: (self.x + (self.width / 2)) as i32 }
+    }
+
+    fn expanded(self, margin: usize) -> Self {
+        let expanded_x = self.x.saturating_sub(margin);
+        let expanded_y = self.y.saturating_sub(margin);
+        let expanded_right = self.right().saturating_add(margin);
+        let expanded_bottom = self.bottom().saturating_add(margin);
+        Self {
+            x: expanded_x,
+            y: expanded_y,
+            width: expanded_right - expanded_x + 1,
+            height: expanded_bottom - expanded_y + 1,
+        }
+    }
+
+    fn intersects(self, other: &Self) -> bool {
+        self.x <= other.right()
+            && self.right() >= other.x
+            && self.y <= other.bottom()
+            && self.bottom() >= other.y
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RoomLayout {
+    rooms: Vec<RoomRect>,
+    entry_tile: Pos,
+    down_stairs_tile: Pos,
+}
+
 pub fn generate_floor(
     run_seed: u64,
     floor_index: u8,
@@ -96,33 +145,16 @@ pub fn generate_floor(
     let mut tiles = vec![TileKind::Wall; width * height];
 
     let floor_seed = derive_floor_seed(run_seed, floor_index, branch_profile);
-
-    // Keep deterministic boundaries as walls and carve a guaranteed tunnel from entry to stairs.
-    let tunnel_y = 2 + ((floor_seed as usize) % (height.saturating_sub(4)));
-    let entry_tile = Pos { y: tunnel_y as i32, x: 1 };
-    let down_stairs_tile = Pos { y: tunnel_y as i32, x: (width - 2) as i32 };
-
-    for x in 1..(width - 1) {
-        tiles[tunnel_y * width + x] = TileKind::Floor;
+    let layout = build_room_layout(floor_seed, width, height);
+    for room in &layout.rooms {
+        carve_room(&mut tiles, width, room);
     }
-    // Add deterministic side pockets to avoid every floor feeling identical.
-    let pocket_count = 3 + (floor_index as usize % 2);
-    for pocket_index in 0..pocket_count {
-        let x = 3 + (((floor_seed >> (pocket_index * 9)) as usize) % (width - 6));
-        let y = 2 + (((floor_seed >> (pocket_index * 5 + 3)) as usize) % (height - 4));
-        for dy in 0..=1 {
-            for dx in 0..=1 {
-                let px = (x + dx).min(width - 2);
-                let py = (y + dy).min(height - 2);
-                tiles[py * width + px] = TileKind::Floor;
-            }
-        }
-        // Ensure each pocket connects to the tunnel.
-        let min_y = tunnel_y.min(y);
-        let max_y = tunnel_y.max(y);
-        for py in min_y..=max_y {
-            tiles[py * width + x] = TileKind::Floor;
-        }
+    carve_room_corridors(&mut tiles, width, floor_seed, &layout.rooms);
+    let entry_tile = nearest_walkable_floor_tile(&tiles, width, height, layout.entry_tile);
+    let mut down_stairs_tile =
+        nearest_walkable_floor_tile(&tiles, width, height, layout.down_stairs_tile);
+    if down_stairs_tile == entry_tile {
+        down_stairs_tile = farthest_walkable_tile_from_entry(&tiles, width, height, entry_tile);
     }
 
     // Branch A bonus: +1 enemy spawn attempt on floors after the starting floor.
@@ -209,6 +241,254 @@ pub fn generate_floor(
     }
 }
 
+fn build_room_layout(floor_seed: u64, width: usize, height: usize) -> RoomLayout {
+    let minimum_room_width = 4usize;
+    let maximum_room_width = 7usize;
+    let minimum_room_height = 3usize;
+    let maximum_room_height = 5usize;
+    let target_room_count = 5 + random_usize(floor_seed, 1, 0, 2);
+
+    let mut rooms = Vec::new();
+    for attempt in 0_u64..120 {
+        if rooms.len() >= target_room_count {
+            break;
+        }
+        let room_width =
+            random_usize(floor_seed, attempt * 8 + 2, minimum_room_width, maximum_room_width);
+        let room_height =
+            random_usize(floor_seed, attempt * 8 + 3, minimum_room_height, maximum_room_height);
+        if room_width + 2 >= width || room_height + 2 >= height {
+            continue;
+        }
+
+        let max_x = width - room_width - 1;
+        let max_y = height - room_height - 1;
+        if max_x <= 1 || max_y <= 1 {
+            continue;
+        }
+
+        let x = random_usize(floor_seed, attempt * 8 + 4, 1, max_x);
+        let y = random_usize(floor_seed, attempt * 8 + 5, 1, max_y);
+        let candidate = RoomRect { x, y, width: room_width, height: room_height };
+        let candidate_with_margin = candidate.expanded(1);
+        if rooms.iter().any(|existing_room: &RoomRect| {
+            existing_room.expanded(1).intersects(&candidate_with_margin)
+        }) {
+            continue;
+        }
+        rooms.push(candidate);
+    }
+
+    add_fallback_rooms(width, height, &mut rooms);
+    rooms.sort_by_key(|room| {
+        let center = room.center();
+        (center.y, center.x, room.height, room.width)
+    });
+
+    let entry_tile = rooms.first().map(|room| room.center()).unwrap_or(Pos { y: 1, x: 1 });
+
+    let mut down_stairs_tile = entry_tile;
+    let mut best_distance = 0_u32;
+    for room in &rooms {
+        let center = room.center();
+        let distance = manhattan(entry_tile, center);
+        if distance > best_distance
+            || (distance == best_distance
+                && (center.y, center.x) > (down_stairs_tile.y, down_stairs_tile.x))
+        {
+            down_stairs_tile = center;
+            best_distance = distance;
+        }
+    }
+
+    RoomLayout { rooms, entry_tile, down_stairs_tile }
+}
+
+fn add_fallback_rooms(width: usize, height: usize, rooms: &mut Vec<RoomRect>) {
+    let fallback_room_width = 4usize;
+    let fallback_room_height = 4usize;
+    if fallback_room_width + 2 >= width || fallback_room_height + 2 >= height {
+        return;
+    }
+
+    let fallback_positions = [
+        (1usize, 1usize),
+        (width - fallback_room_width - 1, 1usize),
+        (1usize, height - fallback_room_height - 1),
+        (width - fallback_room_width - 1, height - fallback_room_height - 1),
+    ];
+
+    for (x, y) in fallback_positions {
+        if rooms.len() >= 4 {
+            break;
+        }
+        let candidate = RoomRect { x, y, width: fallback_room_width, height: fallback_room_height };
+        let candidate_with_margin = candidate.expanded(1);
+        if rooms
+            .iter()
+            .any(|existing_room| existing_room.expanded(1).intersects(&candidate_with_margin))
+        {
+            continue;
+        }
+        rooms.push(candidate);
+    }
+
+    if rooms.is_empty() {
+        rooms.push(RoomRect {
+            x: width / 3,
+            y: height / 3,
+            width: fallback_room_width.min(width.saturating_sub(2)),
+            height: fallback_room_height.min(height.saturating_sub(2)),
+        });
+    }
+}
+
+fn carve_room(tiles: &mut [TileKind], width: usize, room: &RoomRect) {
+    for y in room.y..=room.bottom() {
+        for x in room.x..=room.right() {
+            tiles[y * width + x] = TileKind::Floor;
+        }
+    }
+}
+
+fn carve_room_corridors(tiles: &mut [TileKind], width: usize, floor_seed: u64, rooms: &[RoomRect]) {
+    if rooms.len() < 2 {
+        return;
+    }
+
+    let mut connected_room_indices = vec![0_usize];
+    let mut pending_room_indices: Vec<usize> = (1..rooms.len()).collect();
+
+    while !pending_room_indices.is_empty() {
+        let mut best_choice: Option<(u32, usize, usize)> = None;
+        for &connected_index in &connected_room_indices {
+            let connected_center = rooms[connected_index].center();
+            for &pending_index in &pending_room_indices {
+                let pending_center = rooms[pending_index].center();
+                let distance = manhattan(connected_center, pending_center);
+                let should_replace = match best_choice {
+                    None => true,
+                    Some((best_distance, best_connected_index, best_pending_index)) => {
+                        (distance, connected_index, pending_index)
+                            < (best_distance, best_connected_index, best_pending_index)
+                    }
+                };
+                if should_replace {
+                    best_choice = Some((distance, connected_index, pending_index));
+                }
+            }
+        }
+
+        let (_, connected_index, pending_index) = best_choice.expect("pending list is non-empty");
+        let connected_center = rooms[connected_index].center();
+        let pending_center = rooms[pending_index].center();
+        let horizontal_first =
+            mix_seed_stream(floor_seed, ((connected_index as u64) << 32) | (pending_index as u64))
+                & 1
+                == 0;
+        carve_l_shaped_corridor(tiles, width, connected_center, pending_center, horizontal_first);
+
+        connected_room_indices.push(pending_index);
+        if let Some(position) =
+            pending_room_indices.iter().position(|&index| index == pending_index)
+        {
+            pending_room_indices.remove(position);
+        }
+    }
+}
+
+fn carve_l_shaped_corridor(
+    tiles: &mut [TileKind],
+    width: usize,
+    start: Pos,
+    end: Pos,
+    horizontal_first: bool,
+) {
+    if horizontal_first {
+        carve_horizontal_line(tiles, width, start.y, start.x, end.x);
+        carve_vertical_line(tiles, width, end.x, start.y, end.y);
+    } else {
+        carve_vertical_line(tiles, width, start.x, start.y, end.y);
+        carve_horizontal_line(tiles, width, end.y, start.x, end.x);
+    }
+}
+
+fn carve_horizontal_line(tiles: &mut [TileKind], width: usize, y: i32, left_x: i32, right_x: i32) {
+    let from_x = left_x.min(right_x);
+    let to_x = left_x.max(right_x);
+    for x in from_x..=to_x {
+        let pos = Pos { y, x };
+        if pos.x <= 0 || pos.y <= 0 {
+            continue;
+        }
+        let row = pos.y as usize;
+        let column = pos.x as usize;
+        if column >= width - 1 {
+            continue;
+        }
+        tiles[row * width + column] = TileKind::Floor;
+    }
+}
+
+fn carve_vertical_line(tiles: &mut [TileKind], width: usize, x: i32, top_y: i32, bottom_y: i32) {
+    let from_y = top_y.min(bottom_y);
+    let to_y = top_y.max(bottom_y);
+    for y in from_y..=to_y {
+        let pos = Pos { y, x };
+        if pos.x <= 0 || pos.y <= 0 {
+            continue;
+        }
+        let row = pos.y as usize;
+        let column = pos.x as usize;
+        if column >= width - 1 {
+            continue;
+        }
+        tiles[row * width + column] = TileKind::Floor;
+    }
+}
+
+fn farthest_walkable_tile_from_entry(
+    tiles: &[TileKind],
+    width: usize,
+    height: usize,
+    entry_tile: Pos,
+) -> Pos {
+    let mut best = entry_tile;
+    let mut best_distance = 0_u32;
+    for y in 1..(height - 1) {
+        for x in 1..(width - 1) {
+            let pos = Pos { y: y as i32, x: x as i32 };
+            let tile = tile_at(tiles, width, pos);
+            if tile != TileKind::Floor && tile != TileKind::DownStairs {
+                continue;
+            }
+            let distance = manhattan(entry_tile, pos);
+            if distance > best_distance
+                || (distance == best_distance && (pos.y, pos.x) > (best.y, best.x))
+            {
+                best = pos;
+                best_distance = distance;
+            }
+        }
+    }
+    best
+}
+
+fn random_usize(seed: u64, stream: u64, min_value: usize, max_value: usize) -> usize {
+    debug_assert!(min_value <= max_value);
+    let range_size = max_value - min_value + 1;
+    min_value + (mix_seed_stream(seed, stream) as usize % range_size)
+}
+
+fn mix_seed_stream(seed: u64, stream: u64) -> u64 {
+    let mut mixed = seed ^ stream.wrapping_mul(0xD6E8_FD9A_5B89_7A4D);
+    mixed ^= mixed >> 33;
+    mixed = mixed.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+    mixed ^= mixed >> 33;
+    mixed = mixed.wrapping_mul(0xC4CE_B9FE_1A85_EC53);
+    mixed ^ (mixed >> 33)
+}
+
 fn derive_floor_seed(run_seed: u64, floor_index: u8, branch_profile: BranchProfile) -> u64 {
     let branch_code = match branch_profile {
         BranchProfile::Uncommitted => 0_u64,
@@ -275,7 +555,32 @@ fn tile_at(tiles: &[TileKind], width: usize, pos: Pos) -> TileKind {
 mod tests {
     use std::collections::{BTreeSet, VecDeque};
 
+    use proptest::prelude::*;
+
     use super::*;
+
+    #[test]
+    fn room_layout_places_multiple_non_overlapping_rooms() {
+        let layout = build_room_layout(42, 20, 15);
+        assert!(
+            layout.rooms.len() >= 4,
+            "expected at least four rooms, got {}",
+            layout.rooms.len()
+        );
+
+        for left_index in 0..layout.rooms.len() {
+            for right_index in (left_index + 1)..layout.rooms.len() {
+                let left_with_margin = layout.rooms[left_index].expanded(1);
+                let right_with_margin = layout.rooms[right_index].expanded(1);
+                assert!(
+                    !left_with_margin.intersects(&right_with_margin),
+                    "rooms must not overlap or touch: {:?} vs {:?}",
+                    layout.rooms[left_index],
+                    layout.rooms[right_index]
+                );
+            }
+        }
+    }
 
     #[test]
     fn same_inputs_produce_byte_identical_floor_output() {
@@ -383,8 +688,82 @@ mod tests {
         }
     }
 
+    #[test]
+    fn generated_floor_has_single_connected_walkable_region() {
+        let generated = generate_floor(444_444, 3, BranchProfile::BranchA);
+        assert!(
+            all_walkable_tiles_connected(&generated),
+            "all walkable tiles should be part of one connected region"
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        #[test]
+        fn generated_floors_keep_walkable_tiles_connected(seed in any::<u64>(), floor in 1_u8..=MAX_FLOORS, branch_selector in 0_u8..=2) {
+            let branch = match branch_selector {
+                0 => BranchProfile::Uncommitted,
+                1 => BranchProfile::BranchA,
+                _ => BranchProfile::BranchB,
+            };
+
+            let generated = generate_floor(seed, floor, branch);
+            prop_assert!(
+                all_walkable_tiles_connected(&generated),
+                "seed={seed}, floor={floor}, branch={branch:?} should produce a connected walkable layout"
+            );
+        }
+    }
+
     fn manhattan(a: Pos, b: Pos) -> u32 {
         a.x.abs_diff(b.x) + a.y.abs_diff(b.y)
+    }
+
+    fn all_walkable_tiles_connected(generated: &GeneratedFloor) -> bool {
+        let mut walkable_positions = Vec::new();
+        for y in 0..generated.height {
+            for x in 0..generated.width {
+                let pos = Pos { y: y as i32, x: x as i32 };
+                let tile = generated.tile_at(pos);
+                if tile == TileKind::Floor
+                    || tile == TileKind::ClosedDoor
+                    || tile == TileKind::DownStairs
+                {
+                    walkable_positions.push(pos);
+                }
+            }
+        }
+
+        let Some(start) = walkable_positions.first().copied() else {
+            return true;
+        };
+
+        let mut open = VecDeque::from([start]);
+        let mut seen = BTreeSet::from([start]);
+        while let Some(pos) = open.pop_front() {
+            for next in [
+                Pos { y: pos.y - 1, x: pos.x },
+                Pos { y: pos.y, x: pos.x + 1 },
+                Pos { y: pos.y + 1, x: pos.x },
+                Pos { y: pos.y, x: pos.x - 1 },
+            ] {
+                if seen.contains(&next) {
+                    continue;
+                }
+                let tile = generated.tile_at(next);
+                if tile != TileKind::Floor
+                    && tile != TileKind::ClosedDoor
+                    && tile != TileKind::DownStairs
+                {
+                    continue;
+                }
+                seen.insert(next);
+                open.push_back(next);
+            }
+        }
+
+        seen.len() == walkable_positions.len()
     }
 
     fn has_walkable_route(generated: &GeneratedFloor, start: Pos, goal: Pos) -> bool {
