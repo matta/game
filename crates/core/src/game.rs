@@ -1204,126 +1204,163 @@ fn danger_tags_for_kind(kind: ActorKind) -> Vec<DangerTag> {
 }
 
 fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
-    let mut best_safe: Option<(Pos, usize)> = None;
-    let mut best_hazard: Option<(Pos, usize)> = None;
-    for y in 0..map.internal_height {
-        for x in 0..map.internal_width {
-            let p = Pos { y: y as i32, x: x as i32 };
-            if p == start || !is_frontier_candidate(map, p) {
-                continue;
-            }
-            if !map.is_hazard(p) {
-                if let Some(path) = astar_path(map, start, p) {
-                    let len = path.len();
-                    let is_better = match best_safe {
-                        None => true,
-                        Some((best_pos, best_len)) => {
-                            len < best_len
-                                || (len == best_len && (p.y, p.x) < (best_pos.y, best_pos.x))
-                        }
-                    };
-                    if is_better {
-                        best_safe = Some((p, len));
-                    }
-                } else if let Some(path) = astar_path_allow_hazards(map, start, p) {
-                    // Safe frontier target reachable only by traversing hazard tiles.
-                    let len = path.len();
-                    let is_better = match best_hazard {
-                        None => true,
-                        Some((best_pos, best_len)) => {
-                            len < best_len
-                                || (len == best_len && (p.y, p.x) < (best_pos.y, best_pos.x))
-                        }
-                    };
-                    if is_better {
-                        best_hazard = Some((p, len));
-                    }
-                }
-            } else if let Some(path) = astar_path_allow_hazards(map, start, p) {
-                let len = path.len();
-                let is_better = match best_hazard {
-                    None => true,
-                    Some((best_pos, best_len)) => {
-                        len < best_len || (len == best_len && (p.y, p.x) < (best_pos.y, best_pos.x))
-                    }
-                };
-                if is_better {
-                    best_hazard = Some((p, len));
-                }
-            }
-        }
+    // Pass 1: BFS/Dijkstra avoiding hazards.
+    if let Some(intent) = find_nearest_frontier(map, start, true) {
+        return Some(intent);
     }
 
-    if let Some((t, l)) = best_safe {
-        let reason = if map.tile_at(t) == TileKind::ClosedDoor {
-            AutoReason::Door
-        } else {
-            AutoReason::Frontier
-        };
-        return Some(AutoExploreIntent { target: t, reason, path_len: l as u16 });
-    }
-
-    if let Some((t, l)) = best_hazard {
-        return Some(AutoExploreIntent {
-            target: t,
-            reason: AutoReason::ThreatAvoidance,
-            path_len: l as u16,
-        });
+    // Pass 2: BFS/Dijkstra allowing hazards (fallback).
+    if let Some(intent) = find_nearest_frontier(map, start, false) {
+        return Some(AutoExploreIntent { reason: AutoReason::ThreatAvoidance, ..intent });
     }
 
     choose_downstairs_intent(map, start)
 }
 
-fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
-    let mut best_safe: Option<(Pos, usize)> = None;
-    let mut best_hazard: Option<(Pos, usize)> = None;
+fn find_nearest_frontier(map: &Map, start: Pos, avoid_hazards: bool) -> Option<AutoExploreIntent> {
+    if !map.is_discovered_walkable(start) {
+        return None;
+    }
+    if avoid_hazards && map.is_hazard(start) {
+        return None;
+    }
 
-    for y in 0..map.internal_height {
-        for x in 0..map.internal_width {
-            let pos = Pos { y: y as i32, x: x as i32 };
-            if map.tile_at(pos) != TileKind::DownStairs || !map.is_discovered(pos) || pos == start {
+    let mut visited = BTreeMap::new();
+    let mut queue = VecDeque::new();
+
+    visited.insert(start, 0u16);
+    queue.push_back(start);
+
+    let mut best_target: Option<(u16, Pos)> = None;
+
+    while let Some(current) = queue.pop_front() {
+        let dist = *visited.get(&current).unwrap();
+
+        if let Some((best_dist, _)) = best_target {
+            if dist > best_dist {
+                break;
+            }
+        }
+
+        if is_frontier_candidate(map, current) {
+            let is_better = match best_target {
+                None => true,
+                Some((best_dist, best_pos)) => {
+                    dist < best_dist
+                        || (dist == best_dist && (current.y, current.x) < (best_pos.y, best_pos.x))
+                }
+            };
+            if is_better {
+                best_target = Some((dist, current));
+            }
+        }
+
+        // Neighbors in deterministic order: Up, Right, Down, Left
+        for neighbor in neighbors(current) {
+            if !map.is_discovered_walkable(neighbor) {
+                continue;
+            }
+            if avoid_hazards && map.is_hazard(neighbor) {
+                continue;
+            }
+            // Closed doors block transit.
+            if map.tile_at(current) == TileKind::ClosedDoor {
                 continue;
             }
 
-            if let Some(path) = astar_path(map, start, pos) {
-                let len = path.len();
-                let is_better = match best_safe {
-                    None => true,
-                    Some((best_pos, best_len)) => {
-                        len < best_len
-                            || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
-                    }
-                };
-                if is_better {
-                    best_safe = Some((pos, len));
-                }
-            } else if let Some(path) = astar_path_allow_hazards(map, start, pos) {
-                let len = path.len();
-                let is_better = match best_hazard {
-                    None => true,
-                    Some((best_pos, best_len)) => {
-                        len < best_len
-                            || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
-                    }
-                };
-                if is_better {
-                    best_hazard = Some((pos, len));
-                }
+            if !visited.contains_key(&neighbor) {
+                visited.insert(neighbor, dist + 1);
+                queue.push_back(neighbor);
             }
         }
     }
 
-    if let Some((target, len)) = best_safe {
-        return Some(AutoExploreIntent {
-            target,
-            reason: AutoReason::Frontier,
-            path_len: len as u16,
-        });
+    best_target.map(|(dist, target)| {
+        let reason = if map.tile_at(target) == TileKind::ClosedDoor {
+            AutoReason::Door
+        } else {
+            AutoReason::Frontier
+        };
+        AutoExploreIntent { target, reason, path_len: dist }
+    })
+}
+
+fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
+    // Pass 1: BFS/Dijkstra avoiding hazards.
+    if let Some(intent) = find_nearest_downstairs(map, start, true) {
+        return Some(intent);
     }
-    best_hazard.map(|(target, len)| AutoExploreIntent {
+
+    // Pass 2: BFS/Dijkstra allowing hazards (fallback).
+    if let Some(intent) = find_nearest_downstairs(map, start, false) {
+        return Some(AutoExploreIntent { reason: AutoReason::ThreatAvoidance, ..intent });
+    }
+
+    None
+}
+
+fn find_nearest_downstairs(map: &Map, start: Pos, avoid_hazards: bool) -> Option<AutoExploreIntent> {
+    if !map.is_discovered_walkable(start) {
+        return None;
+    }
+    if avoid_hazards && map.is_hazard(start) {
+        return None;
+    }
+
+    let mut visited = BTreeMap::new();
+    let mut queue = VecDeque::new();
+
+    visited.insert(start, 0u16);
+    queue.push_back(start);
+
+    let mut best_target: Option<(u16, Pos)> = None;
+
+    while let Some(current) = queue.pop_front() {
+        let dist = *visited.get(&current).unwrap();
+
+        if let Some((best_dist, _)) = best_target {
+            if dist > best_dist {
+                break;
+            }
+        }
+
+        if map.tile_at(current) == TileKind::DownStairs && map.is_discovered(current) && current != start {
+            let is_better = match best_target {
+                None => true,
+                Some((best_dist, best_pos)) => {
+                    dist < best_dist
+                        || (dist == best_dist && (current.y, current.x) < (best_pos.y, best_pos.x))
+                }
+            };
+            if is_better {
+                best_target = Some((dist, current));
+            }
+        }
+
+        // Neighbors in deterministic order: Up, Right, Down, Left
+        for neighbor in neighbors(current) {
+            if !map.is_discovered_walkable(neighbor) {
+                continue;
+            }
+            if avoid_hazards && map.is_hazard(neighbor) {
+                continue;
+            }
+            // Closed doors block transit.
+            if map.tile_at(current) == TileKind::ClosedDoor {
+                continue;
+            }
+
+            if !visited.contains_key(&neighbor) {
+                visited.insert(neighbor, dist + 1);
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    best_target.map(|(dist, target)| AutoExploreIntent {
         target,
-        reason: AutoReason::ThreatAvoidance,
-        path_len: len as u16,
+        reason: AutoReason::Frontier,
+        path_len: dist,
     })
 }
 
@@ -3410,5 +3447,31 @@ mod tests {
         let intent = choose_frontier_intent(&map, start).expect("door frontier should be found");
         assert_eq!(intent.target, door);
         assert_eq!(intent.reason, AutoReason::Door);
+    }
+
+    #[test]
+    fn choose_frontier_intent_optimized_behavior() {
+        // These tests will initially fail until choose_frontier_intent is optimized.
+        // But since we are replacing the internal implementation, we can use the same 
+        // public API tests to verify the new behavior.
+
+        // 1. Dijkstra correctly identifies distances.
+        // (Handled by existing regression tests)
+
+        // 2. Safe frontier preferred over hazard frontier.
+        let (mut map, start) = hazard_lane_fixture();
+        // Path to (4,3) is length 1 (safe).
+        // Path to (4,5) is length 3 (via hazard (4,4)).
+        // Make both frontiers.
+        map.discovered[3 * map.internal_width + 3] = false; // neighbor of (4,3)
+        map.discovered[4 * map.internal_width + 6] = false; // neighbor of (4,5)
+        map.set_hazard(Pos { y: 4, x: 4 }, true);
+
+        let intent = choose_frontier_intent(&map, start).expect("frontier should be found");
+        assert_eq!(intent.target, Pos { y: 4, x: 3 }, "should prefer safe frontier");
+        assert_eq!(intent.reason, AutoReason::Frontier);
+
+        // 3. Hazard fallback is correctly triggered.
+        // (Handled by existing regression tests case 3)
     }
 }
