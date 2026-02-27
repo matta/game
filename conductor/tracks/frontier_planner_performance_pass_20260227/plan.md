@@ -33,7 +33,7 @@ Replace the current loop of A* scans with the optimized single-source searches i
 
 Confirm that the new optimized planner remains behaviorally consistent with the original implementation and correctly handles all edge cases.
 
-- [ ] Task: Run the Phase 1 baseline regression tests with the new BFS/Dijkstra implementation and confirm that all test cases produce identical results to the original A*-based implementation.
-- [ ] Task: Verify that `AutoReason::Door` and `AutoReason::ThreatAvoidance` logic is correctly preserved in all relevant scenarios.
-- [ ] Task: Perform a final performance check to ensure the new planner is responsive and efficient across large maps.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md)
+- [x] Task: Run the Phase 1 baseline regression tests with the new BFS/Dijkstra implementation and confirm that all test cases produce identical results to the original A*-based implementation. 2f7bdee
+- [x] Task: Verify that `AutoReason::Door` and `AutoReason::ThreatAvoidance` logic is correctly preserved in all relevant scenarios. 2f7bdee
+- [x] Task: Perform a final performance check to ensure the new planner is responsive and efficient across large maps. 2f7bdee
+- [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md) 2f7bdee
