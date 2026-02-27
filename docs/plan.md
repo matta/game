@@ -665,7 +665,7 @@ Execution guardrails for all Milestone 4 passes:
 - [ ] Preserve DR-003 constraints throughout: strict one-way descent, no overworld selector, no ascending mechanics.
 
 ### Milestone 4a — Floor State + Deterministic Generator Contract (3–4 hrs)
-- [x] Introduce explicit floor progression state in `core` with fixed MVP constants: `MAX_FLOORS = 3`, starting floor index `1`.
+- [x] Introduce explicit floor progression state in `core` with fixed MVP constants: `MAX_FLOORS = 5`, starting floor index `1`.
 - [x] Add deterministic floor-generation API in `core` with full input contract: `(run_seed, floor_index, branch_profile) -> generated_floor`.
 - [x] Define generated floor payload to include at minimum: map tiles, player entry tile, one down-stairs tile, enemy/item spawn placements.
 - [x] Keep only one active floor state in memory at a time (prior floor state discarded on descent; no backtracking storage).
@@ -697,8 +697,8 @@ Execution guardrails for all Milestone 4 passes:
 ### Milestone 4c — Branch Choice + Persistent Branch Profile (3–4 hrs)
 - [x] Introduce exactly one MVP branch commitment point: branch prompt appears on first descent only (floor 1 -> floor 2 transition). Merge the branch selection prompt directly into the descent interrupt to avoid back-to-back modal popups (mitigating Interrupt Fatigue).
 - [x] Define two fixed branch profiles for MVP and freeze their modifiers:
-- [x] `Branch A`: increases enemy density on floors 2–3 (`+1` enemy group spawn attempt per floor).
-- [x] `Branch B`: increases hazard density on floors 2–3 (`+3` hazard tiles per floor, deterministic placement rules).
+- [x] `Branch A`: increases enemy density on floors 2–5 (`+1` enemy group spawn attempt per floor).
+- [x] `Branch B`: increases hazard density on floors 2–5 (`+3` hazard tiles per floor, deterministic placement rules).
 - [x] Persist branch commitment in run state and thread it into deterministic floor generation for all subsequent floors.
 - [ ] Issue a checkpoint marker on Branch Commitment, but omit per-level checkpoints to preserve tension and mitigate the Emotional Dilution risk. Deferred to Milestone 6 journal/checkpoint implementation.
 - [x] Ensure branch prompt is emitted exactly once per run and never re-offered after commitment.
@@ -727,7 +727,7 @@ Execution guardrails for all Milestone 4 passes:
 ### Milestone 4e — App/UI Wiring + Multi-Floor Smoke Coverage (1–2 hrs)
 - [x] Surface current floor index and committed branch in app HUD/log output.
 - [x] Add branch-choice and descent prompt handling in app loop with explicit key bindings.
-- [x] Add end-to-end smoke test: fixed seed run reaches floor 3 through one branch path and remains replay-stable.
+- [x] Add end-to-end smoke test: fixed seed run reaches floor 5 through one branch path and remains replay-stable.
 - [x] Add companion smoke test for the alternate branch path confirming deterministic divergence in floor characteristics.
 - [x] Add regression test: app exposes no overworld selector and no ascend action bindings.
 **Pass 4e Exit Criteria:**

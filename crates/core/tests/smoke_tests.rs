@@ -1,17 +1,17 @@
 use core::ContentPack;
 use core::{AdvanceStopReason, Choice, Game, GameMode, Interrupt};
 
-fn run_to_floor_three(seed: u64, branch: Choice) -> u64 {
+fn run_to_floor_five(seed: u64, branch: Choice) -> u64 {
     let content = ContentPack::default();
     let mut game = Game::new(seed, &content, GameMode::Ironman);
-    let mut floor_3_reached = false;
+    let mut floor_5_reached = false;
 
-    // 2000 steps should be plenty for the starter layout to reach floor 3
-    for _ in 0..2000 {
+    // 4000 steps should be plenty for the starter layout to reach floor 5
+    for _ in 0..4000 {
         let res = game.advance(10);
 
-        if game.state().floor_index == 3 {
-            floor_3_reached = true;
+        if game.state().floor_index == 5 {
+            floor_5_reached = true;
         }
 
         match res.stop_reason {
@@ -35,28 +35,28 @@ fn run_to_floor_three(seed: u64, branch: Choice) -> u64 {
         }
     }
 
-    assert!(floor_3_reached, "Floor 3 was not reached for seed {} and branch {:?}", seed, branch);
+    assert!(floor_5_reached, "Floor 5 was not reached for seed {} and branch {:?}", seed, branch);
     game.snapshot_hash()
 }
 
 #[test]
 fn test_smoke_run_branch_a() {
-    let hash = run_to_floor_three(12345, Choice::DescendBranchA);
+    let hash = run_to_floor_five(12345, Choice::DescendBranchA);
     assert!(hash != 0);
 }
 
 #[test]
 fn test_smoke_run_branch_b() {
-    let hash = run_to_floor_three(12345, Choice::DescendBranchB);
+    let hash = run_to_floor_five(12345, Choice::DescendBranchB);
     assert!(hash != 0);
 }
 
 #[test]
 fn test_smoke_branches_diverge() {
     // Both starts from same seed but different branches at floor 1 -> 2 transition.
-    let hash_a = run_to_floor_three(12345, Choice::DescendBranchA);
-    let hash_b = run_to_floor_three(12345, Choice::DescendBranchB);
-    assert_ne!(hash_a, hash_b, "Different branches should produce different hashes at floor 3");
+    let hash_a = run_to_floor_five(12345, Choice::DescendBranchA);
+    let hash_b = run_to_floor_five(12345, Choice::DescendBranchB);
+    assert_ne!(hash_a, hash_b, "Different branches should produce different hashes at floor 5");
 }
 
 #[test]

@@ -3,7 +3,7 @@ use crate::{
     types::{ActorKind, ItemKind, Pos, TileKind},
 };
 
-pub const MAX_FLOORS: u8 = 3;
+pub const MAX_FLOORS: u8 = 5;
 pub const STARTING_FLOOR_INDEX: u8 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -231,8 +231,18 @@ fn pick_enemy_kind(floor_index: u8, floor_seed: u64, spawn_index: usize) -> Acto
                 ActorKind::Gargoyle
             }
         }
-        _ => {
-            // Floor 3
+        3 => {
+            if roll < 20 {
+                ActorKind::BloodAcolyte
+            } else if roll < 50 {
+                ActorKind::CorruptedGuard
+            } else if roll < 80 {
+                ActorKind::Gargoyle
+            } else {
+                ActorKind::LivingArmor
+            }
+        }
+        4 => {
             if roll < 20 {
                 ActorKind::CorruptedGuard
             } else if roll < 50 {
@@ -241,6 +251,18 @@ fn pick_enemy_kind(floor_index: u8, floor_seed: u64, spawn_index: usize) -> Acto
                 ActorKind::LivingArmor
             } else {
                 ActorKind::ShadowStalker
+            }
+        }
+        _ => {
+            // Floor 5
+            if roll < 20 {
+                ActorKind::Gargoyle
+            } else if roll < 40 {
+                ActorKind::LivingArmor
+            } else if roll < 70 {
+                ActorKind::ShadowStalker
+            } else {
+                ActorKind::AbyssalWarden
             }
         }
     }
