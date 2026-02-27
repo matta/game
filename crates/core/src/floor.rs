@@ -1,4 +1,7 @@
-use crate::types::{ActorKind, Pos, TileKind};
+use crate::{
+    content::keys,
+    types::{ActorKind, ItemKind, Pos, TileKind},
+};
 
 pub const MAX_FLOORS: u8 = 3;
 pub const STARTING_FLOOR_INDEX: u8 = 1;
@@ -18,6 +21,7 @@ pub struct EnemySpawn {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ItemSpawn {
+    pub kind: ItemKind,
     pub pos: Pos,
 }
 
@@ -208,21 +212,80 @@ fn pick_enemy_kind(floor_index: u8, floor_seed: u64, spawn_index: usize) -> Acto
     let roll = random_usize(floor_seed, 5000 + spawn_index as u64, 0, 99);
     match floor_index {
         1 => {
-            if roll < 60 { ActorKind::Goblin }
-            else if roll < 90 { ActorKind::FeralHound }
-            else { ActorKind::BloodAcolyte }
+            if roll < 60 {
+                ActorKind::Goblin
+            } else if roll < 90 {
+                ActorKind::FeralHound
+            } else {
+                ActorKind::BloodAcolyte
+            }
         }
         2 => {
-            if roll < 20 { ActorKind::FeralHound }
-            else if roll < 50 { ActorKind::BloodAcolyte }
-            else if roll < 80 { ActorKind::CorruptedGuard }
-            else { ActorKind::Gargoyle }
+            if roll < 20 {
+                ActorKind::FeralHound
+            } else if roll < 50 {
+                ActorKind::BloodAcolyte
+            } else if roll < 80 {
+                ActorKind::CorruptedGuard
+            } else {
+                ActorKind::Gargoyle
+            }
         }
-        _ => { // Floor 3
-            if roll < 20 { ActorKind::CorruptedGuard }
-            else if roll < 50 { ActorKind::Gargoyle }
-            else if roll < 80 { ActorKind::LivingArmor }
-            else { ActorKind::ShadowStalker }
+        _ => {
+            // Floor 3
+            if roll < 20 {
+                ActorKind::CorruptedGuard
+            } else if roll < 50 {
+                ActorKind::Gargoyle
+            } else if roll < 80 {
+                ActorKind::LivingArmor
+            } else {
+                ActorKind::ShadowStalker
+            }
+        }
+    }
+}
+
+fn pick_item_kind(_floor_index: u8, floor_seed: u64, spawn_index: usize) -> ItemKind {
+    let roll = random_usize(floor_seed, 6000 + spawn_index as u64, 0, 99);
+
+    // 25% Weapon, 45% Consumable, 30% Perk
+    if roll < 25 {
+        let w_roll = random_usize(floor_seed, 6001 + spawn_index as u64, 0, 99);
+        match w_roll % 5 {
+            0 => ItemKind::Weapon(keys::WEAPON_RUSTY_SWORD),
+            1 => ItemKind::Weapon(keys::WEAPON_IRON_MACE),
+            2 => ItemKind::Weapon(keys::WEAPON_STEEL_LONGSWORD),
+            3 => ItemKind::Weapon(keys::WEAPON_PHASE_DAGGER),
+            _ => ItemKind::Weapon(keys::WEAPON_BLOOD_AXE),
+        }
+    } else if roll < 70 {
+        let c_roll = random_usize(floor_seed, 6002 + spawn_index as u64, 0, 99);
+        match c_roll % 10 {
+            0 => ItemKind::Consumable(keys::CONSUMABLE_MINOR_HP_POT),
+            1 => ItemKind::Consumable(keys::CONSUMABLE_MAJOR_HP_POT),
+            2 => ItemKind::Consumable(keys::CONSUMABLE_TELEPORT_RUNE),
+            3 => ItemKind::Consumable(keys::CONSUMABLE_FORTIFICATION_SCROLL),
+            4 => ItemKind::Consumable(keys::CONSUMABLE_STASIS_HOURGLASS),
+            5 => ItemKind::Consumable(keys::CONSUMABLE_MAGNETIC_LURE),
+            6 => ItemKind::Consumable(keys::CONSUMABLE_SMOKE_BOMB),
+            7 => ItemKind::Consumable(keys::CONSUMABLE_SHRAPNEL_BOMB),
+            8 => ItemKind::Consumable(keys::CONSUMABLE_HASTE_POTION),
+            _ => ItemKind::Consumable(keys::CONSUMABLE_IRON_SKIN_POTION),
+        }
+    } else {
+        let p_roll = random_usize(floor_seed, 6003 + spawn_index as u64, 0, 99);
+        match p_roll % 10 {
+            0 => ItemKind::Perk(keys::PERK_TOUGHNESS),
+            1 => ItemKind::Perk(keys::PERK_SWIFT),
+            2 => ItemKind::Perk(keys::PERK_BERSERKER_RHYTHM),
+            3 => ItemKind::Perk(keys::PERK_PACIFISTS_BOUNTY),
+            4 => ItemKind::Perk(keys::PERK_SNIPERS_EYE),
+            5 => ItemKind::Perk(keys::PERK_IRON_WILL),
+            6 => ItemKind::Perk(keys::PERK_BLOODLUST),
+            7 => ItemKind::Perk(keys::PERK_SCOUT),
+            8 => ItemKind::Perk(keys::PERK_RECKLESS_STRIKE),
+            _ => ItemKind::Perk(keys::PERK_SHADOW_STEP),
         }
     }
 }
@@ -259,10 +322,7 @@ pub fn generate_floor(
     let mut enemy_spawns = Vec::with_capacity(target_total);
 
     if floor_index == MAX_FLOORS {
-        enemy_spawns.push(EnemySpawn {
-            kind: ActorKind::AbyssalWarden,
-            pos: down_stairs_tile,
-        });
+        enemy_spawns.push(EnemySpawn { kind: ActorKind::AbyssalWarden, pos: down_stairs_tile });
     }
 
     for enemy_index in 0..enemy_count {
@@ -309,9 +369,10 @@ pub fn generate_floor(
     };
     let item_pos = nearest_walkable_floor_tile(&tiles, width, height, item_target);
     if item_pos != entry_tile && item_pos != down_stairs_tile {
-        item_spawns.push(ItemSpawn { pos: item_pos });
+        item_spawns
+            .push(ItemSpawn { kind: pick_item_kind(floor_index, floor_seed, 0), pos: item_pos });
     }
-    item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x));
+    item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x, spawn.kind));
 
     // Vault stamps will be applied before branch hazards so hazards don't get overwritten.
     let mut hazards = vec![false; width * height];
@@ -375,7 +436,10 @@ pub fn generate_floor(
                     && center != down_stairs_tile
                     && !item_spawns.iter().any(|spawn| spawn.pos == center)
                 {
-                    item_spawns.push(ItemSpawn { pos: center });
+                    item_spawns.push(ItemSpawn {
+                        kind: pick_item_kind(floor_index, floor_seed, item_spawns.len()),
+                        pos: center,
+                    });
                 }
             }
         }
@@ -383,7 +447,7 @@ pub fn generate_floor(
     enemy_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x, spawn.kind));
     enemy_spawns.dedup_by_key(|spawn| spawn.pos); // Ensure no overlapping enemies from movement
 
-    item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x));
+    item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x, spawn.kind));
 
     // Branch B bonus: +3 hazard tiles on floors after the starting floor.
     // We apply this after vaults so that vault placement doesn't delete the branch's bonus hazards.
@@ -847,11 +911,13 @@ mod tests {
     fn boss_spawns_on_final_floor() {
         let generator_seed = 1234;
         let final_floor = generate_floor(generator_seed, MAX_FLOORS, BranchProfile::Uncommitted);
-        let boss_count = final_floor.enemy_spawns.iter().filter(|s| s.kind == ActorKind::AbyssalWarden).count();
+        let boss_count =
+            final_floor.enemy_spawns.iter().filter(|s| s.kind == ActorKind::AbyssalWarden).count();
         assert_eq!(boss_count, 1, "Exactly one boss should spawn on the final floor");
 
         let early_floor = generate_floor(generator_seed, 2, BranchProfile::Uncommitted);
-        let early_boss_count = early_floor.enemy_spawns.iter().filter(|s| s.kind == ActorKind::AbyssalWarden).count();
+        let early_boss_count =
+            early_floor.enemy_spawns.iter().filter(|s| s.kind == ActorKind::AbyssalWarden).count();
         assert_eq!(early_boss_count, 0, "Boss should not spawn on earlier floors");
     }
 

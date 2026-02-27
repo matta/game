@@ -1,3 +1,4 @@
+use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,7 +21,7 @@ static GENERATED_SEED_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub fn generate_runtime_seed() -> u64 {
     let now_nanos =
         SystemTime::now().duration_since(UNIX_EPOCH).map_or(0_u128, |duration| duration.as_nanos());
-    let pid = u64::from(std::process::id());
+    let pid = u64::from(process::id());
     let counter = GENERATED_SEED_COUNTER.fetch_add(1, Ordering::Relaxed);
 
     let entropy = (now_nanos as u64)

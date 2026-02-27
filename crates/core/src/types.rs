@@ -19,6 +19,13 @@ pub enum TileKind {
     DownStairs,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ItemKind {
+    Weapon(&'static str),
+    Consumable(&'static str),
+    Perk(&'static str),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ActorKind {
     Player,
@@ -80,6 +87,7 @@ pub enum Interrupt {
     LootFound {
         prompt_id: ChoicePromptId,
         item: ItemId,
+        kind: ItemKind,
     },
     EnemyEncounter {
         prompt_id: ChoicePromptId,
@@ -125,8 +133,8 @@ pub enum GameError {
 pub enum LogEvent {
     AutoReasonChanged { reason: AutoReason, target: Pos, path_len: u16 },
     EnemyEncountered { enemy: EntityId },
-    ItemPickedUp,
-    ItemDiscarded,
+    ItemPickedUp { kind: ItemKind },
+    ItemDiscarded { kind: ItemKind },
     EncounterResolved { enemy: EntityId, fought: bool },
 }
 

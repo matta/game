@@ -115,18 +115,14 @@ pub fn replay_to_end(
 mod tests {
     use super::*;
     use crate::journal::InputJournal;
-    use crate::types::{Choice, PolicyUpdate, Stance};
+    use crate::types::{Choice, Interrupt, PolicyUpdate, Stance, TargetTag};
 
     const MAX_TEST_RUN_LOOP_COUNT: usize = 512;
 
-    fn floor_transition_choice(interrupt: &crate::types::Interrupt) -> Choice {
+    fn floor_transition_choice(interrupt: &Interrupt) -> Choice {
         match interrupt {
-            crate::types::Interrupt::FloorTransition { requires_branch_choice, .. } => {
-                if *requires_branch_choice {
-                    Choice::DescendBranchA
-                } else {
-                    Choice::Descend
-                }
+            Interrupt::FloorTransition { requires_branch_choice, .. } => {
+                if *requires_branch_choice { Choice::DescendBranchA } else { Choice::Descend }
             }
             _ => panic!("expected FloorTransition"),
         }
@@ -152,22 +148,22 @@ mod tests {
                     break;
                 }
                 AdvanceStopReason::Interrupted(interrupt) => match interrupt {
-                    crate::types::Interrupt::DoorBlocked { prompt_id, .. } => {
+                    Interrupt::DoorBlocked { prompt_id, .. } => {
                         game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
                         journal.append_choice(prompt_id, Choice::OpenDoor, seq);
                         seq += 1;
                     }
-                    crate::types::Interrupt::EnemyEncounter { prompt_id, .. } => {
+                    Interrupt::EnemyEncounter { prompt_id, .. } => {
                         game1.apply_choice(prompt_id, Choice::Fight).unwrap();
                         journal.append_choice(prompt_id, Choice::Fight, seq);
                         seq += 1;
                     }
-                    crate::types::Interrupt::LootFound { prompt_id, .. } => {
+                    Interrupt::LootFound { prompt_id, .. } => {
                         game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
                         journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                         seq += 1;
                     }
-                    int @ crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                    int @ Interrupt::FloorTransition { prompt_id, .. } => {
                         let choice = floor_transition_choice(&int);
                         game1.apply_choice(prompt_id, choice.clone()).unwrap();
                         journal.append_choice(prompt_id, choice, seq);
@@ -207,33 +203,33 @@ mod tests {
                     if !policy_edited {
                         game1
                             .apply_policy_update(PolicyUpdate::TargetPriority(vec![
-                                crate::types::TargetTag::LowestHp,
+                                TargetTag::LowestHp,
                             ]))
                             .unwrap();
                         journal.append_policy_update(
                             seq,
-                            PolicyUpdate::TargetPriority(vec![crate::types::TargetTag::LowestHp]),
+                            PolicyUpdate::TargetPriority(vec![TargetTag::LowestHp]),
                             seq,
                         );
                         policy_edited = true;
                     }
                     match interrupt {
-                        crate::types::Interrupt::DoorBlocked { prompt_id, .. } => {
+                        Interrupt::DoorBlocked { prompt_id, .. } => {
                             game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
                             journal.append_choice(prompt_id, Choice::OpenDoor, seq);
                             seq += 1;
                         }
-                        crate::types::Interrupt::EnemyEncounter { prompt_id, .. } => {
+                        Interrupt::EnemyEncounter { prompt_id, .. } => {
                             game1.apply_choice(prompt_id, Choice::Fight).unwrap();
                             journal.append_choice(prompt_id, Choice::Fight, seq);
                             seq += 1;
                         }
-                        crate::types::Interrupt::LootFound { prompt_id, .. } => {
+                        Interrupt::LootFound { prompt_id, .. } => {
                             game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
                             journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                             seq += 1;
                         }
-                        int @ crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                        int @ Interrupt::FloorTransition { prompt_id, .. } => {
                             let choice = floor_transition_choice(&int);
                             game1.apply_choice(prompt_id, choice.clone()).unwrap();
                             journal.append_choice(prompt_id, choice, seq);
@@ -274,22 +270,22 @@ mod tests {
                     break;
                 }
                 AdvanceStopReason::Interrupted(interrupt) => match interrupt {
-                    crate::types::Interrupt::DoorBlocked { prompt_id, .. } => {
+                    Interrupt::DoorBlocked { prompt_id, .. } => {
                         game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
                         journal.append_choice(prompt_id, Choice::OpenDoor, seq);
                         seq += 1;
                     }
-                    crate::types::Interrupt::EnemyEncounter { prompt_id, .. } => {
+                    Interrupt::EnemyEncounter { prompt_id, .. } => {
                         game1.apply_choice(prompt_id, Choice::Fight).unwrap();
                         journal.append_choice(prompt_id, Choice::Fight, seq);
                         seq += 1;
                     }
-                    crate::types::Interrupt::LootFound { prompt_id, .. } => {
+                    Interrupt::LootFound { prompt_id, .. } => {
                         game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
                         journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                         seq += 1;
                     }
-                    int @ crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                    int @ Interrupt::FloorTransition { prompt_id, .. } => {
                         let choice = floor_transition_choice(&int);
                         game1.apply_choice(prompt_id, choice.clone()).unwrap();
                         journal.append_choice(prompt_id, choice, seq);

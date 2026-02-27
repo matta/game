@@ -1,17 +1,22 @@
+use app::{
+    app_loop::{AppMode, AppState},
+    seed::{generate_runtime_seed, resolve_seed_from_args},
+};
 use core::{ContentPack, Game, GameMode, Interrupt, LogEvent, Pos, TileKind};
 use macroquad::prelude::*;
+use std::{env, process::exit};
 
 #[macroquad::main("Roguelike")]
 async fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let generated_seed = app::seed::generate_runtime_seed();
-    let selected_seed = match app::seed::resolve_seed_from_args(&args, generated_seed) {
+    let args: Vec<String> = env::args().collect();
+    let generated_seed = generate_runtime_seed();
+    let selected_seed = match resolve_seed_from_args(&args, generated_seed) {
         Ok(seed_choice) => seed_choice,
         Err(message) => {
             let program_name = args.first().map_or("game", String::as_str);
             eprintln!("Error: {message}");
             eprintln!("Usage: {program_name} [--seed <u64>]");
-            std::process::exit(2);
+            exit(2);
         }
     };
     let run_seed = selected_seed.value();
@@ -19,7 +24,7 @@ async fn main() {
     let content = ContentPack::default();
     let mut game = Game::new(run_seed, &content, GameMode::Ironman);
 
-    let mut app_state = app::app_loop::AppState::default();
+    let mut app_state = AppState::default();
 
     loop {
         clear_background(BLACK);
@@ -63,12 +68,10 @@ async fn main() {
         draw_event_log(&game, 430.0, map_top, line_height);
 
         let status = match app_state.mode {
-            app::app_loop::AppMode::PendingPrompt { ref interrupt, .. } => prompt_text(interrupt),
-            app::app_loop::AppMode::Finished(outcome) => format!("Finished ({:?})", outcome),
-            app::app_loop::AppMode::AutoPlay => "Auto-Explore ON (Space to pause)".to_string(),
-            app::app_loop::AppMode::Paused => {
-                "Paused (Space to Auto-Explore, Right to step)".to_string()
-            }
+            AppMode::PendingPrompt { ref interrupt, .. } => prompt_text(interrupt),
+            AppMode::Finished(outcome) => format!("Finished ({:?})", outcome),
+            AppMode::AutoPlay => "Auto-Explore ON (Space to pause)".to_string(),
+            AppMode::Paused => "Paused (Space to Auto-Explore, Right to step)".to_string(),
         };
         draw_text(&status, 20.0, 30.0, 20.0, WHITE);
         draw_text(&format!("Tick: {}", game.current_tick()), 20.0, 350.0, 20.0, WHITE);
@@ -224,8 +227,8 @@ fn draw_event_log(game: &Game, left: f32, top: f32, line_height: f32) {
         let line = match event {
             LogEvent::AutoReasonChanged { reason, .. } => auto_reason_text(*reason).to_string(),
             LogEvent::EnemyEncountered { enemy } => format!("enemy encountered {:?}", enemy),
-            LogEvent::ItemPickedUp => "picked up item".to_string(),
-            LogEvent::ItemDiscarded => "discarded item".to_string(),
+            LogEvent::ItemPickedUp { kind: _ } => "picked up item".to_string(),
+            LogEvent::ItemDiscarded { kind: _ } => "discarded item".to_string(),
             LogEvent::EncounterResolved { enemy, fought } => {
                 format!("encounter {:?} resolved fought={}", enemy, fought)
             }

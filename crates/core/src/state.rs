@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use slotmap::SlotMap;
 
 use crate::floor::BranchProfile;
@@ -13,6 +15,7 @@ pub struct Actor {
     pub attack: i32,
     pub defense: i32,
     pub active_weapon_slot: WeaponSlot,
+    pub equipped_weapon: Option<&'static str>,
     pub next_action_tick: u64,
     pub speed: u32,
 }
@@ -20,6 +23,7 @@ pub struct Actor {
 #[derive(Clone, Debug)]
 pub struct Item {
     pub id: ItemId,
+    pub kind: ItemKind,
     pub pos: Pos,
 }
 
@@ -160,7 +164,9 @@ pub struct GameState {
     pub branch_profile: BranchProfile,
     pub auto_intent: Option<AutoExploreIntent>,
     pub policy: Policy,
-    pub threat_trace: std::collections::VecDeque<ThreatTrace>,
+    pub threat_trace: VecDeque<ThreatTrace>,
+    pub active_perks: Vec<&'static str>,
+    pub kills_this_floor: u32,
 }
 
 #[cfg(test)]

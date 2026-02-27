@@ -1,9 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
 
-use crate::content::{get_enemy_stats, ContentPack};
+use crate::content::{ContentPack, get_enemy_stats, keys};
 use crate::floor::{BranchProfile, MAX_FLOORS, STARTING_FLOOR_INDEX, generate_floor};
 use crate::state::{Actor, GameState, Item, Map};
 use crate::types::*;
@@ -75,6 +76,7 @@ impl Game {
             attack: 5,
             defense: 0,
             active_weapon_slot: WeaponSlot::Primary,
+            equipped_weapon: None,
             next_action_tick: 10,
             speed: 10,
         };
@@ -91,6 +93,7 @@ impl Game {
             attack: stats_a.attack,
             defense: stats_a.defense,
             active_weapon_slot: WeaponSlot::Primary,
+            equipped_weapon: None,
             next_action_tick: stats_a.speed as u64,
             speed: stats_a.speed,
         };
@@ -107,6 +110,7 @@ impl Game {
             attack: stats_b.attack,
             defense: stats_b.defense,
             active_weapon_slot: WeaponSlot::Primary,
+            equipped_weapon: None,
             next_action_tick: stats_b.speed as u64,
             speed: stats_b.speed,
         };
@@ -123,6 +127,7 @@ impl Game {
             attack: stats_c.attack,
             defense: stats_c.defense,
             active_weapon_slot: WeaponSlot::Primary,
+            equipped_weapon: None,
             next_action_tick: stats_c.speed as u64,
             speed: stats_c.speed,
         };
@@ -139,6 +144,7 @@ impl Game {
             attack: stats_d.attack,
             defense: stats_d.defense,
             active_weapon_slot: WeaponSlot::Primary,
+            equipped_weapon: None,
             next_action_tick: stats_d.speed as u64,
             speed: stats_d.speed,
         };
@@ -189,7 +195,11 @@ impl Game {
         map.set_tile(Pos { y: 11, x: 13 }, TileKind::DownStairs);
 
         let mut items = slotmap::SlotMap::with_key();
-        let item = Item { id: ItemId::default(), pos: Pos { y: 5, x: 6 } };
+        let item = Item {
+            id: ItemId::default(),
+            kind: ItemKind::Consumable(keys::CONSUMABLE_MINOR_HP_POT),
+            pos: Pos { y: 5, x: 6 },
+        };
         let item_id = items.insert(item);
         items[item_id].id = item_id;
 
@@ -210,7 +220,9 @@ impl Game {
                 branch_profile: BranchProfile::Uncommitted,
                 auto_intent: None,
                 policy: Policy::default(),
-                threat_trace: std::collections::VecDeque::new(),
+                threat_trace: VecDeque::new(),
+                active_perks: Vec::new(),
+                kills_this_floor: 0,
             },
             log: Vec::new(),
             next_input_seq: 0,
@@ -220,6 +232,14 @@ impl Game {
             at_pause_boundary: true,
             finished_outcome: None,
             no_progress_ticks: 0,
+        }
+    }
+
+    pub fn get_fov_radius(&self) -> i32 {
+        if self.state.active_perks.contains(&keys::PERK_SCOUT) {
+            FOV_RADIUS + 2
+        } else {
+            FOV_RADIUS
         }
     }
 
@@ -279,7 +299,8 @@ impl Game {
                     return self.interrupt_door(next_step, steps);
                 }
                 self.state.actors[self.state.player_id].pos = next_step;
-                compute_fov(&mut self.state.map, next_step, FOV_RADIUS);
+                let r = self.get_fov_radius();
+                compute_fov(&mut self.state.map, next_step, r);
                 player_moved = true;
             }
 
@@ -380,16 +401,52 @@ impl Game {
         }
         let handled = match (prompt.kind, choice) {
             (PendingPromptKind::Loot { item }, Choice::KeepLoot) => {
+                let kind = self.state.items[item].kind;
+                self.apply_item_effect(kind);
                 self.state.items.remove(item);
+                self.log.push(LogEvent::ItemPickedUp { kind });
                 true
             }
             (PendingPromptKind::Loot { item }, Choice::DiscardLoot) => {
+                let kind = self.state.items[item].kind;
                 self.state.items.remove(item);
+                self.log.push(LogEvent::ItemDiscarded { kind });
                 true
             }
             (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Fight) => {
                 let mut p_attack = self.state.actors[self.state.player_id].attack;
                 let mut _p_defense = self.state.actors[self.state.player_id].defense;
+
+                let equipped = self.state.actors[self.state.player_id].equipped_weapon;
+                let ignores_armor = equipped == Some(keys::WEAPON_PHASE_DAGGER);
+                let lifesteal = equipped == Some(keys::WEAPON_BLOOD_AXE);
+
+                if let Some(w) = equipped {
+                    if w == keys::WEAPON_RUSTY_SWORD {
+                        p_attack += 2;
+                    } else if w == keys::WEAPON_IRON_MACE {
+                        p_attack += 4;
+                    } else if w == keys::WEAPON_STEEL_LONGSWORD {
+                        p_attack += 6;
+                    } else if w == keys::WEAPON_PHASE_DAGGER {
+                        p_attack += 3;
+                    } else if w == keys::WEAPON_BLOOD_AXE {
+                        p_attack += 6;
+                    }
+                }
+
+                if self.state.active_perks.contains(&keys::PERK_IRON_WILL) {
+                    _p_defense += 2;
+                }
+                if self.state.active_perks.contains(&keys::PERK_RECKLESS_STRIKE) {
+                    p_attack += 4;
+                    _p_defense -= 2;
+                }
+                if self.state.active_perks.contains(&keys::PERK_BERSERKER_RHYTHM)
+                    && equipped.is_none()
+                {
+                    p_attack += 3;
+                }
 
                 match self.state.policy.stance {
                     Stance::Aggressive => {
@@ -403,8 +460,12 @@ impl Game {
                     }
                 }
 
-                let e_defense = self.state.actors[primary_enemy].defense;
-                let damage = (p_attack - e_defense).max(1);
+                let mut e_defense = self.state.actors[primary_enemy].defense;
+                if ignores_armor {
+                    e_defense = 0;
+                }
+
+                let damage = (p_attack.saturating_sub(e_defense)).max(1);
 
                 let e_actor = self.state.actors.get_mut(primary_enemy).unwrap();
                 e_actor.hp -= damage;
@@ -413,21 +474,53 @@ impl Game {
 
                 if e_actor.hp <= 0 {
                     self.state.actors.remove(primary_enemy);
+                    self.state.kills_this_floor += 1;
+
+                    let has_bloodlust = self.state.active_perks.contains(&keys::PERK_BLOODLUST);
+                    let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                    if has_bloodlust {
+                        player.hp = (player.hp + 2).min(player.max_hp);
+                    }
+                    if lifesteal {
+                        player.hp = (player.hp + 1).min(player.max_hp);
+                    }
                 }
 
                 true
             }
             (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Avoid) => {
-                self.suppressed_enemy = Some(primary_enemy);
+                if self.state.active_perks.contains(&keys::PERK_SHADOW_STEP) {
+                    let player_pos = self.state.actors[self.state.player_id].pos;
+                    let mut best_pos = player_pos;
+                    let mut max_dist = 0;
+                    for y in (player_pos.y - 3)..=(player_pos.y + 3) {
+                        for x in (player_pos.x - 3)..=(player_pos.x + 3) {
+                            let p = Pos { y, x };
+                            if self.state.map.is_discovered_walkable(p)
+                                && !self.state.actors.values().any(|a| a.pos == p)
+                                && self.state.map.tile_at(p) != TileKind::ClosedDoor
+                            {
+                                let d = manhattan(player_pos, p);
+                                if d > max_dist {
+                                    max_dist = d;
+                                    best_pos = p;
+                                }
+                            }
+                        }
+                    }
+                    self.state.actors.get_mut(self.state.player_id).unwrap().pos = best_pos;
+                    let r = self.get_fov_radius();
+                    compute_fov(&mut self.state.map, best_pos, r);
+                    self.suppressed_enemy = None;
+                } else {
+                    self.suppressed_enemy = Some(primary_enemy);
+                }
                 true
             }
             (PendingPromptKind::DoorBlocked { pos }, Choice::OpenDoor) => {
                 self.state.map.set_tile(pos, TileKind::Floor);
-                compute_fov(
-                    &mut self.state.map,
-                    self.state.actors[self.state.player_id].pos,
-                    FOV_RADIUS,
-                );
+                let r = self.get_fov_radius();
+                compute_fov(&mut self.state.map, self.state.actors[self.state.player_id].pos, r);
                 true
             }
             (
@@ -464,6 +557,14 @@ impl Game {
                     }
                     _ => {}
                 }
+                if self.state.active_perks.contains(&keys::PERK_PACIFISTS_BOUNTY)
+                    && self.state.kills_this_floor == 0
+                {
+                    let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                    player.max_hp += 5;
+                    player.hp = player.max_hp;
+                }
+                self.state.kills_this_floor = 0;
                 match next_floor {
                     Some(next_index) => self.descend_to_floor(next_index),
                     None => {
@@ -557,6 +658,125 @@ impl Game {
     }
     pub fn log(&self) -> &[LogEvent] {
         &self.log
+    }
+
+    fn apply_item_effect(&mut self, kind: ItemKind) {
+        match kind {
+            ItemKind::Weapon(id) => {
+                let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                player.equipped_weapon = Some(id);
+            }
+            ItemKind::Perk(id) => {
+                if !self.state.active_perks.contains(&id) {
+                    self.state.active_perks.push(id);
+                }
+            }
+            ItemKind::Consumable(id) => match id {
+                keys::CONSUMABLE_MINOR_HP_POT => {
+                    let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                    player.hp = (player.hp + 10).min(player.max_hp);
+                }
+                keys::CONSUMABLE_MAJOR_HP_POT => {
+                    let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                    player.hp = (player.hp + 25).min(player.max_hp);
+                }
+                keys::CONSUMABLE_TELEPORT_RUNE => {
+                    let player_pos = self.state.actors[self.state.player_id].pos;
+                    let mut nearest = None;
+                    let mut min_dist = u32::MAX;
+                    for (e_id, actor) in &self.state.actors {
+                        if e_id != self.state.player_id && self.state.map.is_visible(actor.pos) {
+                            let dist = manhattan(player_pos, actor.pos);
+                            if dist < min_dist {
+                                min_dist = dist;
+                                nearest = Some(e_id);
+                            }
+                        }
+                    }
+                    if let Some(e_id) = nearest {
+                        let e_pos = self.state.actors[e_id].pos;
+                        self.state.actors.get_mut(self.state.player_id).unwrap().pos = e_pos;
+                        self.state.actors.get_mut(e_id).unwrap().pos = player_pos;
+                    }
+                }
+                keys::CONSUMABLE_FORTIFICATION_SCROLL => {
+                    let player_pos = self.state.actors[self.state.player_id].pos;
+                    for neighbor in neighbors(player_pos) {
+                        if self.state.map.is_discovered_walkable(neighbor)
+                            && self.state.map.tile_at(neighbor) != TileKind::DownStairs
+                        {
+                            self.state.map.set_tile(neighbor, TileKind::Wall);
+                        }
+                    }
+                    let r = self.get_fov_radius();
+                    compute_fov(
+                        &mut self.state.map,
+                        self.state.actors[self.state.player_id].pos,
+                        r,
+                    );
+                }
+                keys::CONSUMABLE_STASIS_HOURGLASS => {
+                    for (e_id, actor) in self.state.actors.iter_mut() {
+                        if e_id != self.state.player_id && self.state.map.is_visible(actor.pos) {
+                            actor.next_action_tick += 50;
+                        }
+                    }
+                }
+                keys::CONSUMABLE_MAGNETIC_LURE => {
+                    let player_pos = self.state.actors[self.state.player_id].pos;
+                    let mut moves = Vec::new();
+                    for (e_id, actor) in &self.state.actors {
+                        if e_id != self.state.player_id
+                            && self.state.map.is_visible(actor.pos)
+                            && let Some(path) = astar_path(&self.state.map, actor.pos, player_pos)
+                            && !path.is_empty()
+                        {
+                            moves.push((e_id, path[0]));
+                        }
+                    }
+                    for (e_id, target_pos) in moves {
+                        if !self.state.actors.values().any(|a| a.pos == target_pos) {
+                            self.state.actors.get_mut(e_id).unwrap().pos = target_pos;
+                        }
+                    }
+                }
+                keys::CONSUMABLE_SMOKE_BOMB => {
+                    self.state.threat_trace.clear();
+                    self.suppressed_enemy = None;
+                    for (e_id, actor) in self.state.actors.iter_mut() {
+                        if e_id != self.state.player_id && self.state.map.is_visible(actor.pos) {
+                            actor.next_action_tick += 20;
+                        }
+                    }
+                }
+                keys::CONSUMABLE_SHRAPNEL_BOMB => {
+                    let mut to_remove = Vec::new();
+                    for (e_id, actor) in self.state.actors.iter_mut() {
+                        if e_id != self.state.player_id && self.state.map.is_visible(actor.pos) {
+                            actor.hp -= 5;
+                            if actor.hp <= 0 {
+                                to_remove.push(e_id);
+                            }
+                        }
+                    }
+                    for e_id in to_remove {
+                        self.state.actors.remove(e_id);
+                    }
+                }
+                keys::CONSUMABLE_HASTE_POTION => {
+                    let tick = self.tick;
+                    let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                    let target = player.next_action_tick.saturating_sub(50);
+                    player.next_action_tick = target.max(tick + 1);
+                }
+                keys::CONSUMABLE_IRON_SKIN_POTION => {
+                    let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                    player.max_hp += 5;
+                    player.hp += 5;
+                }
+                _ => {}
+            },
+        }
     }
 
     fn interrupt_loot(&mut self, item: ItemId, steps: u32) -> AdvanceResult {
@@ -661,6 +881,7 @@ impl Game {
                 attack: stats.attack,
                 defense: stats.defense,
                 active_weapon_slot: WeaponSlot::Primary,
+                equipped_weapon: None,
                 next_action_tick: stats.speed as u64,
                 speed: stats.speed,
             };
@@ -670,7 +891,7 @@ impl Game {
 
         self.state.items.clear();
         for spawn in generated.item_spawns {
-            let item = Item { id: ItemId::default(), pos: spawn.pos };
+            let item = Item { id: ItemId::default(), kind: spawn.kind, pos: spawn.pos };
             let item_id = self.state.items.insert(item);
             self.state.items[item_id].id = item_id;
         }
@@ -688,7 +909,11 @@ impl Game {
 
     fn prompt_to_interrupt(&self, prompt: PendingPrompt) -> Interrupt {
         match prompt.kind {
-            PendingPromptKind::Loot { item } => Interrupt::LootFound { prompt_id: prompt.id, item },
+            PendingPromptKind::Loot { item } => Interrupt::LootFound {
+                prompt_id: prompt.id,
+                item,
+                kind: self.state.items[item].kind,
+            },
             PendingPromptKind::EnemyEncounter {
                 enemies,
                 primary_enemy,
@@ -747,21 +972,21 @@ impl Game {
                     TargetTag::Nearest => manhattan(pos, a.pos).cmp(&manhattan(pos, b.pos)),
                     TargetTag::LowestHp => a.hp.cmp(&b.hp),
                 };
-                if cmp != std::cmp::Ordering::Equal {
+                if cmp != Ordering::Equal {
                     return cmp;
                 }
             }
 
             let dist_cmp = manhattan(pos, a.pos).cmp(&manhattan(pos, b.pos));
-            if dist_cmp != std::cmp::Ordering::Equal {
+            if dist_cmp != Ordering::Equal {
                 return dist_cmp;
             }
             let y_cmp = a.pos.y.cmp(&b.pos.y);
-            if y_cmp != std::cmp::Ordering::Equal {
+            if y_cmp != Ordering::Equal {
                 return y_cmp;
             }
             let x_cmp = a.pos.x.cmp(&b.pos.x);
-            if x_cmp != std::cmp::Ordering::Equal {
+            if x_cmp != Ordering::Equal {
                 return x_cmp;
             }
             a.kind.cmp(&b.kind)
@@ -1301,6 +1526,7 @@ mod tests {
             attack: 2,
             defense: 0,
             active_weapon_slot: WeaponSlot::Primary,
+            equipped_weapon: None,
             next_action_tick: 12,
             speed: 12,
         };
@@ -2459,5 +2685,115 @@ mod tests {
                 draw_map_diag(&map, origin)
             );
         }
+    }
+
+    fn choose<T: Clone>(rng: &mut ChaCha8Rng, slice: &[T]) -> T {
+        use rand_chacha::rand_core::Rng;
+        let p = rng.next_u64() as usize % slice.len();
+        slice[p].clone()
+    }
+
+    #[test]
+    fn test_magnetic_lure_synergy() {
+        let mut game = Game::new(1234, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        let mut map = Map::new(12, 8);
+        for y in 1..7 {
+            for x in 1..11 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        game.state.map = map;
+
+        let player_pos = Pos { y: 4, x: 3 };
+        game.state.actors[game.state.player_id].pos = player_pos;
+        let enemy_pos = Pos { y: 4, x: 8 };
+        let enemy_id = add_goblin(&mut game, enemy_pos);
+
+        // Apply magnetic lure
+        game.apply_item_effect(ItemKind::Consumable(keys::CONSUMABLE_MAGNETIC_LURE));
+
+        let new_enemy_pos = game.state.actors[enemy_id].pos;
+        assert!(manhattan(player_pos, new_enemy_pos) < manhattan(player_pos, enemy_pos));
+    }
+
+    #[test]
+    fn test_repro_fuzz_stall() {
+        let map_seed = 3168286118010506022;
+        let choice_seed = 5538911673549072552;
+        let max_ticks = 2000;
+
+        let content = ContentPack::default();
+        let mut game = Game::new(map_seed, &content, GameMode::Ironman);
+        let mut rng = ChaCha8Rng::seed_from_u64(choice_seed);
+
+        let mut total_steps = 0;
+        let mut stalled_tick = None;
+        while total_steps < max_ticks {
+            let result = game.advance(10);
+            total_steps += result.simulated_ticks;
+
+            match result.stop_reason {
+                AdvanceStopReason::Finished(outcome) => {
+                    if let RunOutcome::Defeat(DeathCause::StalledNoProgress) = outcome {
+                        stalled_tick = Some(game.current_tick());
+                        println!("STALL DETECTED at tick {}", game.current_tick());
+                        let player_pos = game.state().actors[game.state().player_id].pos;
+                        println!("Player pos: {:?}", player_pos);
+                        println!("Auto Intent: {:?}", game.state().auto_intent);
+                        // Print neighbors and if they are discovered/walkable
+                        for n in neighbors(player_pos) {
+                            println!(
+                                "Neighbor {:?}: discovered={}, walkable={}, tile={:?}",
+                                n,
+                                game.state().map.is_discovered(n),
+                                game.state().map.is_discovered_walkable(n),
+                                game.state().map.tile_at(n)
+                            );
+                        }
+                        break;
+                    }
+                    break;
+                }
+                AdvanceStopReason::Interrupted(interrupt) => {
+                    let (prompt_id, choice) = match interrupt {
+                        Interrupt::EnemyEncounter { prompt_id, .. } => (
+                            prompt_id,
+                            choose(&mut rng, &[Choice::Fight, Choice::Avoid, Choice::Fight]),
+                        ),
+                        Interrupt::LootFound { prompt_id, .. } => {
+                            (prompt_id, choose(&mut rng, &[Choice::KeepLoot, Choice::DiscardLoot]))
+                        }
+                        Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
+                        Interrupt::FloorTransition {
+                            prompt_id, requires_branch_choice, ..
+                        } => {
+                            if requires_branch_choice {
+                                (
+                                    prompt_id,
+                                    choose(
+                                        &mut rng,
+                                        &[Choice::DescendBranchA, Choice::DescendBranchB],
+                                    ),
+                                )
+                            } else {
+                                (prompt_id, Choice::Descend)
+                            }
+                        }
+                    };
+                    game.apply_choice(prompt_id, choice).expect("applied invalid choice");
+                }
+                _ => {}
+            }
+        }
+        let stalled_tick =
+            stalled_tick.expect("expected deterministic stall outcome for repro seed");
+        assert!(
+            stalled_tick <= 256,
+            "stall watchdog should terminate repro quickly, got tick {stalled_tick}"
+        );
     }
 }
