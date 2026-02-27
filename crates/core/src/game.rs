@@ -43,6 +43,7 @@ struct OpenNode {
 }
 
 const FOV_RADIUS: i32 = 10;
+const MAX_NO_PROGRESS_TICKS: u32 = 64;
 
 pub struct Game {
     seed: u64,
@@ -57,6 +58,7 @@ pub struct Game {
     pause_requested: bool,
     at_pause_boundary: bool,
     finished_outcome: Option<RunOutcome>,
+    no_progress_ticks: u32,
 }
 
 impl Game {
@@ -210,6 +212,7 @@ impl Game {
             pause_requested: false,
             at_pause_boundary: true,
             finished_outcome: None,
+            no_progress_ticks: 0,
         }
     }
 
@@ -254,6 +257,7 @@ impl Game {
             }
 
             self.plan_auto_intent(player_pos);
+            let mut player_moved = false;
 
             if let Some(intent) = self.state.auto_intent
                 && intent.path_len > 0
@@ -265,6 +269,7 @@ impl Game {
                 }
                 self.state.actors[self.state.player_id].pos = next_step;
                 compute_fov(&mut self.state.map, next_step, FOV_RADIUS);
+                player_moved = true;
             }
 
             self.tick += 1;
@@ -304,6 +309,19 @@ impl Game {
                 self.state.threat_trace.pop_back();
             }
 
+            if player_moved {
+                self.no_progress_ticks = 0;
+            } else {
+                self.no_progress_ticks = self.no_progress_ticks.saturating_add(1);
+                if self.no_progress_ticks >= MAX_NO_PROGRESS_TICKS {
+                    let outcome = RunOutcome::Defeat(DeathCause::StalledNoProgress);
+                    self.finished_outcome = Some(outcome);
+                    return AdvanceResult {
+                        simulated_ticks: steps,
+                        stop_reason: AdvanceStopReason::Finished(outcome),
+                    };
+                }
+            }
         }
         AdvanceResult { simulated_ticks: steps, stop_reason: AdvanceStopReason::BudgetExhausted }
     }
@@ -420,6 +438,7 @@ impl Game {
         }
         self.pending_prompt = None;
         self.next_input_seq += 1;
+        self.no_progress_ticks = 0;
         Ok(())
     }
 
@@ -439,6 +458,7 @@ impl Game {
             PolicyUpdate::ResourceAggression(a) => self.state.policy.resource_aggression = a,
             PolicyUpdate::ExplorationMode(e) => self.state.policy.exploration_mode = e,
         }
+        self.no_progress_ticks = 0;
         Ok(())
     }
 
@@ -452,6 +472,7 @@ impl Game {
             WeaponSlot::Reserve => WeaponSlot::Primary,
         };
         player.next_action_tick += 10;
+        self.no_progress_ticks = 0;
         Ok(())
     }
 
@@ -462,6 +483,7 @@ impl Game {
         hasher.write_u64(self.seed);
         hasher.write_u64(self.tick);
         hasher.write_u64(self.next_input_seq);
+        hasher.write_u32(self.no_progress_ticks);
         hasher.write_u8(self.state.floor_index);
         hasher.write_u8(match self.state.branch_profile {
             BranchProfile::Uncommitted => 0,
@@ -610,6 +632,7 @@ impl Game {
         self.state.floor_index = floor_index;
         self.state.auto_intent = None;
         self.suppressed_enemy = None;
+        self.no_progress_ticks = 0;
     }
 
     fn prompt_to_interrupt(&self, prompt: PendingPrompt) -> Interrupt {
@@ -782,7 +805,8 @@ fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> 
                 let is_better = match best_safe {
                     None => true,
                     Some((best_pos, best_len)) => {
-                        len < best_len || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
+                        len < best_len
+                            || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
                     }
                 };
                 if is_better {
@@ -793,7 +817,8 @@ fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> 
                 let is_better = match best_hazard {
                     None => true,
                     Some((best_pos, best_len)) => {
-                        len < best_len || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
+                        len < best_len
+                            || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
                     }
                 };
                 if is_better {
@@ -804,7 +829,11 @@ fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> 
     }
 
     if let Some((target, len)) = best_safe {
-        return Some(AutoExploreIntent { target, reason: AutoReason::Frontier, path_len: len as u16 });
+        return Some(AutoExploreIntent {
+            target,
+            reason: AutoReason::Frontier,
+            path_len: len as u16,
+        });
     }
     best_hazard.map(|(target, len)| AutoExploreIntent {
         target,
@@ -1353,6 +1382,37 @@ mod tests {
             !matches!(result.stop_reason, AdvanceStopReason::Finished(_)),
             "run should not auto-finish from tick count"
         );
+    }
+
+    #[test]
+    fn no_progress_simulation_finishes_instead_of_spinning_budget_forever() {
+        let mut game = Game::new(66666, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let mut map = Map::new(7, 7);
+        for y in 1..6 {
+            for x in 1..6 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        let isolated = Pos { y: 3, x: 3 };
+        map.set_tile(isolated, TileKind::Floor);
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        game.state.map = map;
+        game.state.actors[game.state.player_id].pos = isolated;
+        game.state.auto_intent = None;
+
+        let result = game.advance(200);
+        assert_eq!(
+            result.simulated_ticks, MAX_NO_PROGRESS_TICKS,
+            "stall watchdog should terminate within a fixed tick budget"
+        );
+        assert!(matches!(
+            result.stop_reason,
+            AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::StalledNoProgress))
+        ));
     }
 
     #[test]

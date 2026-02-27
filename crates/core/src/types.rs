@@ -44,6 +44,7 @@ pub enum Choice {
 pub enum DeathCause {
     Damage,
     Poison,
+    StalledNoProgress,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

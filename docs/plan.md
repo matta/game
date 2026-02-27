@@ -686,6 +686,8 @@ Execution guardrails for all Milestone 4 passes:
 - [x] Add integration test: fixed-seed run descends from floor 1 to floor 2 and receives a different deterministic map state.
 - [x] Add integration test: no legal input path can move from floor N back to floor N-1.
 - [x] Add integration test: floor transition interrupt occurs once per descent event and does not spam while paused on stairs.
+- [x] Add deterministic simulation-stall watchdog in `core::Game::advance` so no-progress states terminate quickly with an explicit defeat reason (instead of spinning `BudgetExhausted` forever).
+- [x] Add bounded replay watchdog + regression assertions so replay/test loops fail fast on non-terminating simulation regressions.
 **Pass 4b Exit Criteria:**
 - **a) User Experience:** The run now has visible forward momentum: reaching stairs moves the player into a new floor context.
 - **b) Progress toward vision:** Implements strict one-way dungeon descent as a core loop element, consistent with DR-003.
