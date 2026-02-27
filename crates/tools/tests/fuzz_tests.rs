@@ -1,4 +1,7 @@
-use game_core::{AdvanceStopReason, Choice, ContentPack, Game, GameMode, Interrupt, TileKind};
+use game_core::{
+    AdvanceStopReason, Choice, ContentPack, DeathCause, Game, GameMode, Interrupt, RunOutcome,
+    TileKind,
+};
 use proptest::prelude::*;
 use rand_chacha::{
     ChaCha8Rng,
@@ -21,7 +24,15 @@ fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Resul
         total_steps += result.simulated_ticks;
 
         match result.stop_reason {
-            AdvanceStopReason::Finished(_outcome) => break,
+            AdvanceStopReason::Finished(RunOutcome::Victory) => break,
+            AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::Damage)) => break,
+            AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::Poison)) => break,
+            AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::StalledNoProgress)) => {
+                return Err(format!(
+                    "Invariant failed: StalledNoProgress on map_seed {}",
+                    map_seed
+                ));
+            }
             AdvanceStopReason::Interrupted(interrupt) => {
                 let (prompt_id, choice) = match interrupt {
                     Interrupt::EnemyEncounter { prompt_id, .. } => (
