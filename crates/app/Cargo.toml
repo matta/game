@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 core = { workspace = true }
 macroquad = { workspace = true }
+taffy = "0.9.2"
 
 [lints]
 workspace = true
