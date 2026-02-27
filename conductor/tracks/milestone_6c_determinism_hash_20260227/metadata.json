@@ -1,0 +1,8 @@
+{
+  "track_id": "milestone_6c_determinism_hash_20260227",
+  "type": "feature",
+  "status": "new",
+  "created_at": "2026-02-27T10:00:00Z",
+  "updated_at": "2026-02-27T10:00:00Z",
+  "description": "Milestone 6c — Determinism Hash Surfacing + Crash-Recovery State File"
+}
