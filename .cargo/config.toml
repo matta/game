@@ -1,0 +1,3 @@
+[alias]
+play = "run --bin app --"
+xtask = "run -p xtask --"
