@@ -505,6 +505,7 @@ dependencies = [
  "anyhow",
  "clap",
  "core",
+ "rand_chacha",
  "serde",
  "serde_json",
 ]

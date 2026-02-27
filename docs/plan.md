@@ -739,6 +739,16 @@ Execution guardrails for all Milestone 4 passes:
 - **b) Progress toward vision:** Advances the 20–40 minute session arc with structured floor progression while honoring DR-003 one-way constraints.
 - **c) Architecture & Maintainability:** Floor generation and transition logic are deterministic, bounded, and covered by unit + integration regressions.
 
+### Milestone 4f — Minimal Headless Fuzzer + CI Integration (1–2 hrs)
+- [x] Create `crates/tools/src/bin/fuzz.rs` to instantiate headless simulation loops.
+- [x] Implement semantic fuzzing oracle: picks random valid choices upon encountering interrupts (Loot, Enemies, Doors, Floor Transitions).
+- [x] Add inline invariant assertions on `&GameState` (e.g. valid HP paths, actor bounds, valid tiles) inside the fuzz loop.
+- [x] Add CI step in `.github/workflows/ci.yml` to run the fuzzer for 1,000 steps on every push.
+**Pass 4f Exit Criteria:**
+- **a) User Experience:** None directly.
+- **b) Progress toward vision:** Mechanically guarantees Vision 6.4 (Determinism + Fairness Validation) by fuzzing semantic paths to catch edge bugs, dead states, and panic conditions immediately.
+- **c) Architecture & Maintainability:** Invariant stress testing is operational and wired into CI, protecting structural integrity continuously from future rapid prototyping and balance changes.
+
 ## Milestone 5 — Content Pass (15–18 hrs)
 - [ ] Populate `core::content`: ~15 items, ~10 perks, 2 gods.
 - [ ] 6–8 enemy types, 1 boss.
