@@ -3353,4 +3353,62 @@ mod tests {
         }
         panic!("did not encounter an enemy within 250 ticks");
     }
+
+    #[test]
+    fn auto_explore_frontier_regression() {
+        // 1. Open room with multiple frontiers.
+        let (map, player_pos) = open_room_fixture();
+        let mut map = map;
+        map.discovered.fill(true);
+        // Make (4,5) a frontier by setting its neighbor (3,5) to undiscovered.
+        map.discovered[3 * map.internal_width + 5] = false;
+        // Nearest frontier is at (4,5), distance 1.
+        let intent = choose_frontier_intent(&map, player_pos).expect("frontier should be found");
+        assert_eq!(intent.target, Pos { y: 4, x: 5 });
+        assert_eq!(intent.path_len, 1);
+
+        // 2. Maze-like layout requiring long paths.
+        let mut map = Map::new(10, 10);
+        for y in 0..10 {
+            for x in 0..10 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        // Path: (1,1) -> (1,8) -> (8,8) -> (8,1)
+        for x in 1..=8 {
+            map.set_tile(Pos { y: 1, x }, TileKind::Floor);
+        }
+        for y in 2..=8 {
+            map.set_tile(Pos { y, x: 8 }, TileKind::Floor);
+        }
+        for x in 1..=7 {
+            map.set_tile(Pos { y: 8, x }, TileKind::Floor);
+        }
+        map.discovered.fill(true);
+        // Frontier at (8,1) - its neighbor (9,1) is unknown.
+        map.discovered[9 * 10 + 1] = false;
+        let start = Pos { y: 1, x: 1 };
+        let intent = choose_frontier_intent(&map, start).expect("frontier should be found in maze");
+        assert_eq!(intent.target, Pos { y: 8, x: 1 });
+        // Path: (1,2..8) [7 steps] + (2..8, 8) [7 steps] + (8, 7..1) [7 steps] = 21 steps.
+        assert_eq!(intent.path_len, 21);
+
+        // 3. Scenarios with hazards.
+        let (mut map, start) = hazard_lane_fixture();
+        // Neighbor of (4,5) is (4,6), make it unknown.
+        map.discovered[4 * map.internal_width + 6] = false;
+        // Set (4,4) as hazard. start is (4,2).
+        map.set_hazard(Pos { y: 4, x: 4 }, true);
+        // Only path to (4,5) is through (4,4).
+        let intent = choose_frontier_intent(&map, start).expect("hazard fallback should work");
+        assert_eq!(intent.reason, AutoReason::ThreatAvoidance);
+        assert_eq!(intent.target, Pos { y: 4, x: 5 });
+
+        // 4. Scenarios with closed doors.
+        let (mut map, start, door) = closed_door_choke_fixture();
+        // door is a frontier candidate because its neighbor is unknown.
+        let intent = choose_frontier_intent(&map, start).expect("door frontier should be found");
+        assert_eq!(intent.target, door);
+        assert_eq!(intent.reason, AutoReason::Door);
+    }
 }
