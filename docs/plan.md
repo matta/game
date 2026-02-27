@@ -762,6 +762,7 @@ Execution guardrails for all Milestone 5 passes:
 - [ ] Implement deterministic corridor routing to connect rooms, creating strategic chokepoints.
 - [ ] Ensure deterministic generation tied strictly to `(seed, floor_index, branch_profile)`.
 - [ ] Add unit tests: ensure fully connected graph (no isolated rooms) and deterministic map output for a given seed.
+- [ ] Add proptest tests: ensure fully connected graph (no isolated rooms).
 **Pass 5a Exit Criteria:**
 - **a) User Experience:** Dungeon layouts feel like actual places with rooms and hallways, offering natural choke points and retreat vectors.
 - **b) Progress toward vision:** Realizes procedural dungeon structure over simple testing arenas.
