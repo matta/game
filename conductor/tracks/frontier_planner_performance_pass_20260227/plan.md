@@ -37,3 +37,6 @@ Confirm that the new optimized planner remains behaviorally consistent with the 
 - [x] Task: Verify that `AutoReason::Door` and `AutoReason::ThreatAvoidance` logic is correctly preserved in all relevant scenarios. 2f7bdee
 - [x] Task: Perform a final performance check to ensure the new planner is responsive and efficient across large maps. 2f7bdee
 - [x] Task: Conductor - User Manual Verification 'Phase 3' (Protocol in workflow.md) 2f7bdee
+
+## Phase: Review Fixes
+- [x] Task: Apply review suggestions 3be11b1
