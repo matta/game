@@ -6,13 +6,13 @@ This plan outlines the steps for optimizing the auto-explore planner in the `cor
 
 Ensure a stable baseline and robust regression tests are in place to verify the new planner's behavioral consistency.
 
-- [ ] Task: Create a comprehensive regression test suite in `crates/core/src/game.rs` that captures the current frontier selection behavior (intent, target, path length) across a variety of map scenarios:
+- [x] Task: Create a comprehensive regression test suite in `crates/core/src/game.rs` that captures the current frontier selection behavior (intent, target, path length) across a variety of map scenarios: b9d6378
     - [ ] Open room with multiple frontiers.
     - [ ] Maze-like layouts requiring long paths.
     - [ ] Scenarios with and without known hazards.
     - [ ] Scenarios with closed doors.
-- [ ] Task: Verify that all baseline tests pass with the current A*-based implementation.
-- [ ] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md)
+- [x] Task: Verify that all baseline tests pass with the current A*-based implementation. b9d6378
+- [x] Task: Conductor - User Manual Verification 'Phase 1' (Protocol in workflow.md) b9d6378
 
 ## Phase 2: Implement Single-Source BFS/Dijkstra Planner
 
