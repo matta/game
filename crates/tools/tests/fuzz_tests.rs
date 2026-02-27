@@ -1,41 +1,30 @@
-use anyhow::Result;
-use clap::Parser;
-use core::{AdvanceStopReason, Choice, ContentPack, Game, GameMode, Interrupt, TileKind};
+use proptest::prelude::*;
+use game_core::{AdvanceStopReason, Choice, ContentPack, Game, GameMode, Interrupt, TileKind, RunOutcome, DeathCause};
 use rand_chacha::{
     ChaCha8Rng,
     rand_core::{Rng, SeedableRng},
 };
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(short, long, default_value_t = 42)]
-    seed: u64,
-    #[arg(short, long, default_value_t = 1000)]
-    ticks: u32,
-}
 
 fn choose<T: Clone>(rng: &mut ChaCha8Rng, slice: &[T]) -> T {
     let p = rng.next_u64() as usize % slice.len();
     slice[p].clone()
 }
 
-fn main() -> Result<()> {
-    let args = Args::parse();
-
-    println!("Starting Fuzz harness on seed {} for max {} steps...", args.seed, args.ticks);
+fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Result<(), String> {
     let content = ContentPack::default();
-    let mut game = Game::new(args.seed, &content, GameMode::Ironman);
-    let mut rng = ChaCha8Rng::seed_from_u64(args.seed);
+    let mut game = Game::new(map_seed, &content, GameMode::Ironman);
+    let mut rng = ChaCha8Rng::seed_from_u64(choice_seed);
 
     let mut total_steps = 0;
-    while total_steps < args.ticks {
+    while total_steps < max_ticks {
         let result = game.advance(10);
         total_steps += result.simulated_ticks;
 
         match result.stop_reason {
             AdvanceStopReason::Finished(outcome) => {
-                println!("Finished with outcome {:?} after {} ticks", outcome, total_steps);
+                if let RunOutcome::Defeat(DeathCause::StalledNoProgress) = outcome {
+                    return Err(format!("StalledNoProgress after {} ticks with map_seed {} and choice_seed {}", total_steps, map_seed, choice_seed));
+                }
                 break;
             }
             AdvanceStopReason::Interrupted(interrupt) => {
@@ -44,13 +33,12 @@ fn main() -> Result<()> {
                         (
                             prompt_id,
                             choose(&mut rng, &[Choice::Fight, Choice::Avoid, Choice::Fight]),
-                        ) // Bias to fight
+                        ) 
                     }
                     Interrupt::LootFound { prompt_id, .. } => {
                         (prompt_id, choose(&mut rng, &[Choice::KeepLoot, Choice::DiscardLoot]))
                     }
                     Interrupt::DoorBlocked { prompt_id, .. } => {
-                        // Must open door or we get stuck
                         (prompt_id, Choice::OpenDoor)
                     }
                     Interrupt::FloorTransition { prompt_id, requires_branch_choice, .. } => {
@@ -66,21 +54,31 @@ fn main() -> Result<()> {
                 };
                 game.apply_choice(prompt_id, choice).expect("fuzz applied invalid choice");
             }
-            AdvanceStopReason::PausedAtBoundary { .. } => {
-                // Not using manual pauses in fuzz
-            }
+            AdvanceStopReason::PausedAtBoundary { .. } => {}
             AdvanceStopReason::BudgetExhausted => {}
         }
 
-        // Assert invariants
         let state = game.state();
         for (_, actor) in state.actors.iter() {
-            assert!(actor.hp <= actor.max_hp, "Invariant failed: HP > Max HP");
+            if actor.hp > actor.max_hp {
+                return Err(format!("Invariant failed: HP > Max HP on map_seed {}", map_seed));
+            }
             let tile = state.map.tile_at(actor.pos);
-            assert!(tile != TileKind::Wall, "Invariant failed: Actor inside wall");
+            if tile == TileKind::Wall {
+                return Err(format!("Invariant failed: Actor inside wall on map_seed {}", map_seed));
+            }
         }
     }
 
-    println!("Fuzzing completed successfully.");
     Ok(())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #[test]
+    fn test_fuzz_game_simulation(map_seed in any::<u64>(), choice_seed in any::<u64>()) {
+        if let Err(msg) = run_fuzz_simulation(map_seed, choice_seed, 2000) {
+            prop_assert!(false, "{}", msg);
+        }
+    }
 }

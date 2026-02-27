@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use core::{ContentPack, InputJournal, ReplayResult, replay::replay_to_end};
+use game_core::{ContentPack, InputJournal, ReplayResult, replay::replay_to_end};
 use std::fs;
 
 #[derive(Parser)]

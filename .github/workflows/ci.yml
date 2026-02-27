@@ -28,7 +28,7 @@ jobs:
       run: cargo clippy -- -D warnings
       
     - name: Run headless fuzzer
-      run: cargo run -p tools --bin fuzz -- --ticks 1000
+      run: PROPTEST_CASES=250 cargo test -p tools --test fuzz_tests --release
       
     - name: Run tests
       run: cargo test --verbose

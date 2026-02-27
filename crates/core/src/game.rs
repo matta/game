@@ -784,7 +784,7 @@ fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
     for y in 0..map.internal_height {
         for x in 0..map.internal_width {
             let p = Pos { y: y as i32, x: x as i32 };
-            if p == start || !is_frontier_candidate_visible(map, p) {
+            if p == start || !is_frontier_candidate(map, p) {
                 continue;
             }
             if !map.is_hazard(p) {
@@ -903,18 +903,18 @@ fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> 
 }
 
 fn is_safe_frontier_candidate(map: &Map, pos: Pos) -> bool {
-    is_frontier_candidate_visible(map, pos) && !map.is_hazard(pos)
+    is_frontier_candidate(map, pos) && !map.is_hazard(pos)
 }
 
-fn is_frontier_candidate_visible(map: &Map, pos: Pos) -> bool {
-    map.is_visible(pos)
+fn is_frontier_candidate(map: &Map, pos: Pos) -> bool {
+    map.is_discovered(pos)
         && map.tile_at(pos) != TileKind::Wall
         && neighbors(pos).iter().any(|n| map.in_bounds(*n) && !map.is_discovered(*n))
 }
 
 fn is_intent_target_still_valid(map: &Map, intent: AutoExploreIntent) -> bool {
     match intent.reason {
-        AutoReason::ThreatAvoidance => is_frontier_candidate_visible(map, intent.target),
+        AutoReason::ThreatAvoidance => is_frontier_candidate(map, intent.target),
         _ => is_safe_frontier_candidate(map, intent.target),
     }
 }
