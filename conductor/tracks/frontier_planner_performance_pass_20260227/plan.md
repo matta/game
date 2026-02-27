@@ -29,7 +29,7 @@ Replace the current loop of A* scans with the optimized single-source searches i
 - [x] Task: Run the newly written unit tests and confirm that the BFS/Dijkstra planner passes all scenarios. 2f7bdee
 - [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md) 2f7bdee
 
-## Phase 3: Final Verification & Performance Validation
+## Phase 3: Final Verification & Performance Validation [checkpoint: f1cf4a1]
 
 Confirm that the new optimized planner remains behaviorally consistent with the original implementation and correctly handles all edge cases.
 
