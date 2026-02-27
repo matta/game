@@ -558,6 +558,7 @@ Scope guard: advanced door/hazard simulation and richer danger scoring defer to 
 Post-2a review carry-over:
 - [ ] Low-priority cleanup (defer unless it blocks clarity): either emit `AutoReason::Stuck` on no-frontier/no-path states or remove the unused variant.
 - [ ] Post-MVP door-state semantics: preserve door identity when opened (e.g., `ClosedDoor -> OpenDoor`) instead of collapsing to `Floor`.
+- [ ] Refactor `Game::apply_item_effect` from monolithic `match` into per-item handlers (or a dispatch table) once Milestone 4 stabilization is complete.
 
 ## Milestone 3 — Combat + Policy (15–18 hrs)
 
@@ -788,10 +789,10 @@ Execution guardrails for all Milestone 5 passes:
 - **c) Architecture & Maintainability:** Enemy definitions remain cleanly integrated with FOV/Pathing and testable.
 
 ### Milestone 5d — Core Content: Items and Perks (4–5 hrs)
-- [ ] Populate `core::content` with ~15 distinct items.
-- [ ] Populate `core::content` with ~10 perks.
-- [ ] **Weirdness Quota (Items):** Implement at least 5 items that modify rule systems (e.g., swapping places, temporary obstacles, armor bypass), not just stat sticks.
-- [ ] **Weirdness Quota (Perks):** Implement at least 3 perks that alter core mechanics (timing, targeting, economy).
+- [x] Populate `core::content` with ~15 distinct items.
+- [x] Populate `core::content` with ~10 perks.
+- [x] **Weirdness Quota (Items):** Implement at least 5 items that modify rule systems (e.g., swapping places, temporary obstacles, armor bypass), not just stat sticks.
+- [x] **Weirdness Quota (Perks):** Implement at least 3 perks that alter core mechanics (timing, targeting, economy).
 - [ ] **Synergy Testing Strategy (Risk Mitigation):** Add test fixtures specifically combining "weird" items and perks to validate that unexpected positive synergies function correctly without engine crashes, addressing the "Synergy Testing Gap".
 **Pass 5d Exit Criteria:**
 - **a) User Experience:** Substantial content density. The player encounters items with weird, rule-breaking properties.

@@ -16,6 +16,7 @@ pub struct Actor {
     pub defense: i32,
     pub active_weapon_slot: WeaponSlot,
     pub equipped_weapon: Option<&'static str>,
+    pub reserve_weapon: Option<&'static str>,
     pub next_action_tick: u64,
     pub speed: u32,
 }

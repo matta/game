@@ -19,7 +19,7 @@ pub enum TileKind {
     DownStairs,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub enum ItemKind {
     Weapon(&'static str),
     Consumable(&'static str),
