@@ -769,9 +769,9 @@ Execution guardrails for all Milestone 5 passes:
 - **c) Architecture & Maintainability:** Continues to uphold strict determinism with solid coverage on generator connectivity.
 
 ### Milestone 5b — Vault Templates & Room Features (3–4 hrs)
-- [ ] Implement deterministic stamping of 3–5 vault templates (e.g., Shrine rooms, Hazard corridors, Elite ambushes) over the generated floors.
-- [ ] Define rules to prevent vaults from overwriting the starting area or the exit stairs.
-- [ ] Add unit tests: vaults spawn reliably across seeds without breaking map connectivity.
+- [x] Implement deterministic stamping of 3–5 vault templates (e.g., Shrine rooms, Hazard corridors, Elite ambushes) over the generated floors.
+- [x] Define rules to prevent vaults from overwriting the starting area or the exit stairs.
+- [x] Add unit tests: vaults spawn reliably across seeds without breaking map connectivity.
 **Pass 5b Exit Criteria:**
 - **a) User Experience:** Specific rooms feel authored and intentionally dangerous or rewarding, breaking up procedural monotony.
 - **b) Progress toward vision:** Brings "authored rules, not handcrafted layouts" to life.

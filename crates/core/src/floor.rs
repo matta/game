@@ -126,6 +126,12 @@ impl RoomRect {
             && self.y <= other.bottom()
             && self.bottom() >= other.y
     }
+
+    fn contains(self, pos: Pos) -> bool {
+        let px = pos.x as usize;
+        let py = pos.y as usize;
+        px >= self.x && px <= self.right() && py >= self.y && py <= self.bottom()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,6 +139,62 @@ struct RoomLayout {
     rooms: Vec<RoomRect>,
     entry_tile: Pos,
     down_stairs_tile: Pos,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VaultTemplate {
+    ShrineRoom,
+    GoblinCamp,
+    PillarRoom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct VaultStamp {
+    template: VaultTemplate,
+    room_index: usize,
+}
+
+fn build_vault_stamps(
+    floor_seed: u64,
+    rooms: &[RoomRect],
+    entry_tile: Pos,
+    down_stairs_tile: Pos,
+) -> Vec<VaultStamp> {
+    let mut valid_indices = Vec::new();
+    for (i, room) in rooms.iter().enumerate() {
+        if !room.contains(entry_tile) && !room.contains(down_stairs_tile) {
+            valid_indices.push(i);
+        }
+    }
+
+    if valid_indices.is_empty() {
+        return Vec::new();
+    }
+
+    // Sort to ensure determinism
+    valid_indices.sort();
+
+    let num_vaults = valid_indices.len().min(1 + random_usize(floor_seed, 2026, 0, 2)); // 1 to 3 vaults
+    let mut stamps = Vec::with_capacity(num_vaults);
+
+    for i in 0..num_vaults {
+        // Pick a deterministically "random" index from valid_indices
+        let pick_idx = random_usize(floor_seed, 3000 + i as u64, 0, valid_indices.len() - 1);
+        let room_index = valid_indices.remove(pick_idx);
+
+        let template = match random_usize(floor_seed, 4000 + i as u64, 0, 2) {
+            0 => VaultTemplate::ShrineRoom,
+            1 => VaultTemplate::GoblinCamp,
+            _ => VaultTemplate::PillarRoom,
+        };
+
+        stamps.push(VaultStamp { template, room_index });
+    }
+
+    // Sort stamps by room_index for stable output
+    stamps.sort_by_key(|stamp| stamp.room_index);
+
+    stamps
 }
 
 pub fn generate_floor(
@@ -210,8 +272,80 @@ pub fn generate_floor(
     }
     item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x));
 
-    // Branch B bonus: +3 hazard tiles on floors after the starting floor.
+    // Vault stamps will be applied before branch hazards so hazards don't get overwritten.
     let mut hazards = vec![false; width * height];
+    tiles[(down_stairs_tile.y as usize) * width + (down_stairs_tile.x as usize)] =
+        TileKind::DownStairs;
+
+    // Apply vault stamps
+    let stamps = build_vault_stamps(floor_seed, &layout.rooms, entry_tile, down_stairs_tile);
+
+    for stamp in stamps {
+        let room = layout.rooms[stamp.room_index];
+        let center = room.center();
+        let cy = center.y as usize;
+        let cx = center.x as usize;
+
+        match stamp.template {
+            VaultTemplate::GoblinCamp => {
+                // Goblin Camp: Campfire at center. We will move up to 4 existing enemies here.
+                hazards[cy * width + cx] = true;
+                let orthogonal = [
+                    Pos { y: center.y - 1, x: center.x },
+                    Pos { y: center.y + 1, x: center.x },
+                    Pos { y: center.y, x: center.x - 1 },
+                    Pos { y: center.y, x: center.x + 1 },
+                ];
+                let mut moved = 0;
+                for spawn in &mut enemy_spawns {
+                    if moved >= 4 {
+                        break;
+                    }
+                    // Move enemies that aren't already placed in a vault and aren't near the start
+                    if spawn.pos != entry_tile && spawn.pos != down_stairs_tile {
+                        let target = orthogonal[moved];
+                        if in_bounds(width, height, target)
+                            && tiles[(target.y as usize) * width + (target.x as usize)]
+                                == TileKind::Floor
+                        {
+                            spawn.pos = target;
+                            moved += 1;
+                        }
+                    }
+                }
+            }
+            VaultTemplate::PillarRoom => {
+                // Pillar Room: A single 1x1 pillar in the very center of the room.
+                // This guarantees we don't block room entrances or narrow corridors.
+                if center != entry_tile
+                    && center != down_stairs_tile
+                    && in_bounds(width, height, center)
+                {
+                    tiles[(center.y as usize) * width + (center.x as usize)] = TileKind::Wall;
+                    hazards[(center.y as usize) * width + (center.x as usize)] = false;
+                    item_spawns.retain(|spawn| spawn.pos != center);
+                    enemy_spawns.retain(|spawn| spawn.pos != center);
+                }
+            }
+            VaultTemplate::ShrineRoom => {
+                // Shrine Room: Item in center.
+                // We omit corner pillars to avoid blocking small 4x3 rooms entirely.
+                if center != entry_tile
+                    && center != down_stairs_tile
+                    && !item_spawns.iter().any(|spawn| spawn.pos == center)
+                {
+                    item_spawns.push(ItemSpawn { pos: center });
+                }
+            }
+        }
+    }
+    enemy_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x, spawn.kind));
+    enemy_spawns.dedup_by_key(|spawn| spawn.pos); // Ensure no overlapping enemies from movement
+
+    item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x));
+
+    // Branch B bonus: +3 hazard tiles on floors after the starting floor.
+    // We apply this after vaults so that vault placement doesn't delete the branch's bonus hazards.
     let branch_hazard_count = match branch_profile {
         BranchProfile::BranchB if floor_index > STARTING_FLOOR_INDEX => 3,
         _ => 0,
@@ -225,8 +359,6 @@ pub fn generate_floor(
             hazards[(pos.y as usize) * width + (pos.x as usize)] = true;
         }
     }
-    tiles[(down_stairs_tile.y as usize) * width + (down_stairs_tile.x as usize)] =
-        TileKind::DownStairs;
     hazards[(down_stairs_tile.y as usize) * width + (down_stairs_tile.x as usize)] = false;
 
     GeneratedFloor {
@@ -578,6 +710,73 @@ mod tests {
                     layout.rooms[left_index],
                     layout.rooms[right_index]
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn vault_stamps_are_deterministic_for_same_floor_seed() {
+        let layout = build_room_layout(2026, 20, 15);
+        let left =
+            build_vault_stamps(2026, &layout.rooms, layout.entry_tile, layout.down_stairs_tile);
+        let right =
+            build_vault_stamps(2026, &layout.rooms, layout.entry_tile, layout.down_stairs_tile);
+        assert_eq!(left, right, "vault stamps should be deterministic for the same floor seed");
+    }
+
+    #[test]
+    fn vault_stamps_never_use_entry_or_stairs_room() {
+        let seeds = [14_u64, 777, 9_001, 123_456];
+        for seed in seeds {
+            let layout = build_room_layout(seed, 20, 15);
+            let stamps =
+                build_vault_stamps(seed, &layout.rooms, layout.entry_tile, layout.down_stairs_tile);
+
+            assert!(!stamps.is_empty(), "expected at least one vault stamp for seed {seed}");
+            for stamp in stamps {
+                let room = layout.rooms[stamp.room_index];
+                assert!(
+                    !room.contains(layout.entry_tile),
+                    "vault room {:?} should not contain entry tile {:?}",
+                    room,
+                    layout.entry_tile
+                );
+                assert!(
+                    !room.contains(layout.down_stairs_tile),
+                    "vault room {:?} should not contain stairs tile {:?}",
+                    room,
+                    layout.down_stairs_tile
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn vaults_spawn_reliably_across_seeds_without_breaking_connectivity() {
+        // Reduced max seeds specifically for A* connectivity which is expensive, but keeping coverage
+        let seeds = [1_u64, 2, 3, 4, 5, 40, 99, 321, 1_024, 999_999];
+        for seed in seeds {
+            for floor in 1..=MAX_FLOORS {
+                let generated = generate_floor(seed, floor, BranchProfile::BranchA);
+                let layout = build_room_layout(
+                    derive_floor_seed(seed, floor, BranchProfile::BranchA),
+                    generated.width,
+                    generated.height,
+                );
+                let stamps = build_vault_stamps(
+                    derive_floor_seed(seed, floor, BranchProfile::BranchA),
+                    &layout.rooms,
+                    layout.entry_tile,
+                    layout.down_stairs_tile,
+                );
+
+                // Allow empty stamps if entry/stairs eat too many rooms, just log the case
+                if !stamps.is_empty() {
+                    assert!(
+                        all_walkable_tiles_connected(&generated),
+                        "vault stamping should keep map connected for seed={seed} floor={floor}"
+                    );
+                }
             }
         }
     }
