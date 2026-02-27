@@ -1203,12 +1203,6 @@ fn danger_tags_for_kind(kind: ActorKind) -> Vec<DangerTag> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AutoSearchTarget {
-    Frontier,
-    Downstairs,
-}
-
 fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
     // Pass 1: BFS/Dijkstra avoiding hazards.
     if let Some(intent) = find_nearest_frontier(map, start, true) {
@@ -1224,7 +1218,19 @@ fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
 }
 
 fn find_nearest_frontier(map: &Map, start: Pos, avoid_hazards: bool) -> Option<AutoExploreIntent> {
-    find_nearest_auto_target(map, start, avoid_hazards, AutoSearchTarget::Frontier)
+    find_nearest_auto_target(
+        map,
+        start,
+        avoid_hazards,
+        |current| is_frontier_candidate(map, current),
+        |target| {
+            if map.tile_at(target) == TileKind::ClosedDoor {
+                AutoReason::Door
+            } else {
+                AutoReason::Frontier
+            }
+        },
+    )
 }
 
 fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
@@ -1246,15 +1252,26 @@ fn find_nearest_downstairs(
     start: Pos,
     avoid_hazards: bool,
 ) -> Option<AutoExploreIntent> {
-    find_nearest_auto_target(map, start, avoid_hazards, AutoSearchTarget::Downstairs)
+    find_nearest_auto_target(
+        map,
+        start,
+        avoid_hazards,
+        |current| map.tile_at(current) == TileKind::DownStairs && map.is_discovered(current),
+        |_target| AutoReason::Frontier,
+    )
 }
 
-fn find_nearest_auto_target(
+fn find_nearest_auto_target<IsTarget, ReasonForTarget>(
     map: &Map,
     start: Pos,
     avoid_hazards: bool,
-    target_kind: AutoSearchTarget,
-) -> Option<AutoExploreIntent> {
+    is_target: IsTarget,
+    reason_for_target: ReasonForTarget,
+) -> Option<AutoExploreIntent>
+where
+    IsTarget: Fn(Pos) -> bool,
+    ReasonForTarget: Fn(Pos) -> AutoReason,
+{
     if !map.is_discovered_walkable(start) {
         return None;
     }
@@ -1276,16 +1293,7 @@ fn find_nearest_auto_target(
             break;
         }
 
-        let is_target = match target_kind {
-            AutoSearchTarget::Frontier => current != start && is_frontier_candidate(map, current),
-            AutoSearchTarget::Downstairs => {
-                current != start
-                    && map.tile_at(current) == TileKind::DownStairs
-                    && map.is_discovered(current)
-            }
-        };
-
-        if is_target {
+        if current != start && is_target(current) {
             let is_better = match best_target {
                 None => true,
                 Some((best_dist, best_pos)) => {
@@ -1319,16 +1327,7 @@ fn find_nearest_auto_target(
     }
 
     best_target.map(|(dist, target)| {
-        let reason = match target_kind {
-            AutoSearchTarget::Frontier => {
-                if map.tile_at(target) == TileKind::ClosedDoor {
-                    AutoReason::Door
-                } else {
-                    AutoReason::Frontier
-                }
-            }
-            AutoSearchTarget::Downstairs => AutoReason::Frontier,
-        };
+        let reason = reason_for_target(target);
         AutoExploreIntent { target, reason, path_len: dist }
     })
 }
