@@ -134,6 +134,11 @@ mod tests {
                         journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                         seq += 1;
                     }
+                    crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                        game1.apply_choice(prompt_id, Choice::Descend).unwrap();
+                        journal.append_choice(prompt_id, Choice::Descend, seq);
+                        seq += 1;
+                    }
                 },
                 _ => {}
             }
@@ -189,6 +194,11 @@ mod tests {
                             journal.append_choice(prompt_id, Choice::KeepLoot, seq);
                             seq += 1;
                         }
+                        crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                            game1.apply_choice(prompt_id, Choice::Descend).unwrap();
+                            journal.append_choice(prompt_id, Choice::Descend, seq);
+                            seq += 1;
+                        }
                     }
                 }
                 _ => {}
@@ -232,6 +242,11 @@ mod tests {
                     crate::types::Interrupt::LootFound { prompt_id, .. } => {
                         game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
                         journal.append_choice(prompt_id, Choice::KeepLoot, seq);
+                        seq += 1;
+                    }
+                    crate::types::Interrupt::FloorTransition { prompt_id, .. } => {
+                        game1.apply_choice(prompt_id, Choice::Descend).unwrap();
+                        journal.append_choice(prompt_id, Choice::Descend, seq);
                         seq += 1;
                     }
                 },

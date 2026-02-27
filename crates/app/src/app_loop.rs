@@ -146,6 +146,13 @@ impl AppState {
                             self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
                         }
                     }
+                    Interrupt::FloorTransition { .. } => {
+                        if keys_pressed.contains(&KeyCode::C) {
+                            game.apply_choice(id, core::Choice::Descend)
+                                .expect("Failed to apply pending choice");
+                            self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                        }
+                    }
                 }
 
                 handle_policy(game);
@@ -170,6 +177,7 @@ impl AppState {
                         Interrupt::LootFound { prompt_id, .. } => prompt_id,
                         Interrupt::EnemyEncounter { prompt_id, .. } => prompt_id,
                         Interrupt::DoorBlocked { prompt_id, .. } => prompt_id,
+                        Interrupt::FloorTransition { prompt_id, .. } => prompt_id,
                     };
                     self.mode = AppMode::PendingPrompt {
                         interrupt,

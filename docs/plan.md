@@ -678,14 +678,14 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Floor generation becomes deterministic, testable, and isolated from UI concerns.
 
 ### Milestone 4b — One-Way Descent Runtime Flow (3–4 hrs)
-- [ ] Add explicit down-stairs semantics to runtime map flow (`TileKind` or equivalent) and place exactly one reachable down-stairs per floor.
-- [ ] Implement descent trigger: when player reaches down-stairs, pause via a deterministic floor-transition interrupt before generating the next floor.
-- [ ] Implement `Descend` choice handling: increment floor index, generate next floor, relocate player to next floor entry tile, recompute FOV/discovery.
-- [ ] Enforce one-way rule in runtime APIs and input handling: no `Ascend` choice, no up-stairs traversal, no return to prior floors.
-- [ ] On floor `MAX_FLOORS`, resolve descent target as run completion (or boss-floor completion path) with deterministic finish behavior.
-- [ ] Add integration test: fixed-seed run descends from floor 1 to floor 2 and receives a different deterministic map state.
-- [ ] Add integration test: no legal input path can move from floor N back to floor N-1.
-- [ ] Add integration test: floor transition interrupt occurs once per descent event and does not spam while paused on stairs.
+- [x] Add explicit down-stairs semantics to runtime map flow (`TileKind` or equivalent) and place exactly one reachable down-stairs per floor.
+- [x] Implement descent trigger: when player reaches down-stairs, pause via a deterministic floor-transition interrupt before generating the next floor.
+- [x] Implement `Descend` choice handling: increment floor index, generate next floor, relocate player to next floor entry tile, recompute FOV/discovery.
+- [x] Enforce one-way rule in runtime APIs and input handling: no `Ascend` choice, no up-stairs traversal, no return to prior floors.
+- [x] On floor `MAX_FLOORS`, resolve descent target as run completion (or boss-floor completion path) with deterministic finish behavior.
+- [x] Add integration test: fixed-seed run descends from floor 1 to floor 2 and receives a different deterministic map state.
+- [x] Add integration test: no legal input path can move from floor N back to floor N-1.
+- [x] Add integration test: floor transition interrupt occurs once per descent event and does not spam while paused on stairs.
 **Pass 4b Exit Criteria:**
 - **a) User Experience:** The run now has visible forward momentum: reaching stairs moves the player into a new floor context.
 - **b) Progress toward vision:** Implements strict one-way dungeon descent as a core loop element, consistent with DR-003.

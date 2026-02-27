@@ -42,6 +42,7 @@ impl GeneratedFloor {
                 TileKind::Wall => 0,
                 TileKind::Floor => 1,
                 TileKind::ClosedDoor => 2,
+                TileKind::DownStairs => 3,
             });
         }
         bytes.extend(self.entry_tile.y.to_le_bytes());
@@ -100,6 +101,8 @@ pub fn generate_floor(
     for x in 1..(width - 1) {
         tiles[tunnel_y * width + x] = TileKind::Floor;
     }
+    tiles[(down_stairs_tile.y as usize) * width + (down_stairs_tile.x as usize)] =
+        TileKind::DownStairs;
 
     // Add deterministic side pockets to avoid every floor feeling identical.
     let pocket_count = 3 + (floor_index as usize % 2);
@@ -182,7 +185,9 @@ fn nearest_walkable_floor_tile(
     for y in 1..(height - 1) {
         for x in 1..(width - 1) {
             let pos = Pos { y: y as i32, x: x as i32 };
-            if tile_at(tiles, width, pos) != TileKind::Floor {
+            if tile_at(tiles, width, pos) != TileKind::Floor
+                && tile_at(tiles, width, pos) != TileKind::DownStairs
+            {
                 continue;
             }
             let distance = pos.x.abs_diff(desired.x) + pos.y.abs_diff(desired.y);
@@ -253,7 +258,10 @@ mod tests {
                     continue;
                 }
                 let tile = generated.tile_at(next);
-                if tile != TileKind::Floor && tile != TileKind::ClosedDoor {
+                if tile != TileKind::Floor
+                    && tile != TileKind::ClosedDoor
+                    && tile != TileKind::DownStairs
+                {
                     continue;
                 }
                 if next == goal {

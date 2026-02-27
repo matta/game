@@ -24,6 +24,7 @@ async fn main() {
             KeyCode::F,
             KeyCode::A,
             KeyCode::O,
+            KeyCode::C,
             KeyCode::M,
             KeyCode::T,
             KeyCode::P,
@@ -144,6 +145,7 @@ fn draw_ascii_map(game: &Game, left: f32, top: f32, line_height: f32) {
                 TileKind::Wall => "#",
                 TileKind::Floor => ".",
                 TileKind::ClosedDoor => "+",
+                TileKind::DownStairs => ">",
             };
 
             let color = if map.is_visible(pos) { WHITE } else { GRAY };
@@ -205,6 +207,10 @@ fn prompt_text(interrupt: &Interrupt) -> String {
             format!("INTERRUPT: Enemy sighted (F=fight, A=avoid) Tags: {:?}", threat.danger_tags)
         }
         Interrupt::DoorBlocked { .. } => "INTERRUPT: Door blocked (O=open)".to_string(),
+        Interrupt::FloorTransition { next_floor, .. } => match next_floor {
+            Some(floor) => format!("INTERRUPT: Stairs reached (C=descend to floor {floor})"),
+            None => "INTERRUPT: Final stairs reached (C=finish run)".to_string(),
+        },
     }
 }
 

@@ -58,6 +58,7 @@ fn test_auto_explore_interrupt_choice_and_resume_loop() {
             Interrupt::LootFound { .. } => KeyCode::L,
             Interrupt::EnemyEncounter { .. } => KeyCode::F,
             Interrupt::DoorBlocked { .. } => KeyCode::O,
+            Interrupt::FloorTransition { .. } => KeyCode::C,
         };
         app.tick(&mut game, &[key]);
     }

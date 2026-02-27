@@ -98,7 +98,9 @@ impl Map {
 
     pub fn is_discovered_walkable(&self, pos: Pos) -> bool {
         self.is_discovered(pos)
-            && (self.tile_at(pos) == TileKind::Floor || self.tile_at(pos) == TileKind::ClosedDoor)
+            && (self.tile_at(pos) == TileKind::Floor
+                || self.tile_at(pos) == TileKind::ClosedDoor
+                || self.tile_at(pos) == TileKind::DownStairs)
     }
 
     pub fn clear_visible(&mut self) {

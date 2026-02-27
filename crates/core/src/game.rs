@@ -4,7 +4,7 @@ use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
 
 use crate::content::ContentPack;
-use crate::floor::{BranchProfile, STARTING_FLOOR_INDEX};
+use crate::floor::{BranchProfile, MAX_FLOORS, STARTING_FLOOR_INDEX, generate_floor};
 use crate::state::{Actor, GameState, Item, Map};
 use crate::types::*;
 
@@ -21,6 +21,10 @@ enum PendingPromptKind {
     },
     DoorBlocked {
         pos: Pos,
+    },
+    FloorTransition {
+        current_floor: u8,
+        next_floor: Option<u8>,
     },
 }
 
@@ -52,6 +56,7 @@ pub struct Game {
     suppressed_enemy: Option<EntityId>,
     pause_requested: bool,
     at_pause_boundary: bool,
+    finished_outcome: Option<RunOutcome>,
 }
 
 impl Game {
@@ -173,6 +178,9 @@ impl Game {
         map.set_hazard(Pos { y: 9, x: 11 }, true);
         map.set_hazard(Pos { y: 10, x: 11 }, true);
 
+        // One-way descent anchor for floor 1.
+        map.set_tile(Pos { y: 11, x: 13 }, TileKind::DownStairs);
+
         let mut items = slotmap::SlotMap::with_key();
         let item = Item { id: ItemId::default(), pos: Pos { y: 5, x: 6 } };
         let item_id = items.insert(item);
@@ -201,12 +209,19 @@ impl Game {
             suppressed_enemy: None,
             pause_requested: false,
             at_pause_boundary: true,
+            finished_outcome: None,
         }
     }
 
     pub fn advance(&mut self, max_steps: u32) -> AdvanceResult {
         self.at_pause_boundary = false;
         let mut steps = 0;
+        if let Some(outcome) = self.finished_outcome {
+            return AdvanceResult {
+                simulated_ticks: 0,
+                stop_reason: AdvanceStopReason::Finished(outcome),
+            };
+        }
         if let Some(prompt) = self.pending_prompt.clone() {
             return AdvanceResult {
                 simulated_ticks: 0,
@@ -225,6 +240,9 @@ impl Game {
             }
 
             let player_pos = self.state.actors[self.state.player_id].pos;
+            if self.state.map.tile_at(player_pos) == TileKind::DownStairs {
+                return self.interrupt_floor_transition(steps);
+            }
             self.clear_stale_suppressed_enemy(player_pos);
             let adjacent = self.find_adjacent_enemy_ids(player_pos);
             if let Some(primary_enemy) = adjacent.first().copied() {
@@ -286,12 +304,6 @@ impl Game {
                 self.state.threat_trace.pop_back();
             }
 
-            if self.tick > 400 {
-                return AdvanceResult {
-                    simulated_ticks: steps,
-                    stop_reason: AdvanceStopReason::Finished(RunOutcome::Victory),
-                };
-            }
         }
         AdvanceResult { simulated_ticks: steps, stop_reason: AdvanceStopReason::BudgetExhausted }
     }
@@ -387,6 +399,18 @@ impl Game {
                     self.state.actors[self.state.player_id].pos,
                     FOV_RADIUS,
                 );
+                true
+            }
+            (PendingPromptKind::FloorTransition { current_floor, next_floor }, Choice::Descend) => {
+                if self.state.floor_index != current_floor {
+                    return Err(GameError::InvalidChoice);
+                }
+                match next_floor {
+                    Some(next_index) => self.descend_to_floor(next_index),
+                    None => {
+                        self.finished_outcome = Some(RunOutcome::Victory);
+                    }
+                }
                 true
             }
             _ => false,
@@ -526,6 +550,68 @@ impl Game {
             stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
         }
     }
+    fn interrupt_floor_transition(&mut self, steps: u32) -> AdvanceResult {
+        let next_floor = if self.state.floor_index < MAX_FLOORS {
+            Some(self.state.floor_index + 1)
+        } else {
+            None
+        };
+        let prompt = PendingPrompt {
+            id: ChoicePromptId(self.next_input_seq),
+            kind: PendingPromptKind::FloorTransition {
+                current_floor: self.state.floor_index,
+                next_floor,
+            },
+        };
+        self.pending_prompt = Some(prompt.clone());
+        AdvanceResult {
+            simulated_ticks: steps,
+            stop_reason: AdvanceStopReason::Interrupted(self.prompt_to_interrupt(prompt)),
+        }
+    }
+
+    fn descend_to_floor(&mut self, floor_index: u8) {
+        let generated = generate_floor(self.seed, floor_index, self.state.branch_profile);
+        let mut map = Map::new(generated.width, generated.height);
+        map.tiles = generated.tiles;
+        map.hazards.fill(false);
+
+        let player_id = self.state.player_id;
+        self.state.actors.retain(|id, _| id == player_id);
+        self.state.actors[player_id].pos = generated.entry_tile;
+
+        for spawn in generated.enemy_spawns {
+            let enemy = Actor {
+                id: EntityId::default(),
+                kind: spawn.kind,
+                pos: spawn.pos,
+                hp: 10,
+                max_hp: 10,
+                attack: 2,
+                defense: 0,
+                active_weapon_slot: WeaponSlot::Primary,
+                next_action_tick: 12,
+                speed: 12,
+            };
+            let enemy_id = self.state.actors.insert(enemy);
+            self.state.actors[enemy_id].id = enemy_id;
+        }
+
+        self.state.items.clear();
+        for spawn in generated.item_spawns {
+            let item = Item { id: ItemId::default(), pos: spawn.pos };
+            let item_id = self.state.items.insert(item);
+            self.state.items[item_id].id = item_id;
+        }
+
+        compute_fov(&mut map, generated.entry_tile, FOV_RADIUS);
+
+        self.state.map = map;
+        self.state.floor_index = floor_index;
+        self.state.auto_intent = None;
+        self.suppressed_enemy = None;
+    }
+
     fn prompt_to_interrupt(&self, prompt: PendingPrompt) -> Interrupt {
         match prompt.kind {
             PendingPromptKind::Loot { item } => Interrupt::LootFound { prompt_id: prompt.id, item },
@@ -543,6 +629,9 @@ impl Game {
             },
             PendingPromptKind::DoorBlocked { pos } => {
                 Interrupt::DoorBlocked { prompt_id: prompt.id, pos }
+            }
+            PendingPromptKind::FloorTransition { current_floor, next_floor } => {
+                Interrupt::FloorTransition { prompt_id: prompt.id, current_floor, next_floor }
             }
         }
     }
@@ -666,10 +755,61 @@ fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
         return Some(AutoExploreIntent { target: t, reason, path_len: l as u16 });
     }
 
-    best_hazard.map(|(t, l)| AutoExploreIntent {
-        target: t,
+    if let Some((t, l)) = best_hazard {
+        return Some(AutoExploreIntent {
+            target: t,
+            reason: AutoReason::ThreatAvoidance,
+            path_len: l as u16,
+        });
+    }
+
+    choose_downstairs_intent(map, start)
+}
+
+fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
+    let mut best_safe: Option<(Pos, usize)> = None;
+    let mut best_hazard: Option<(Pos, usize)> = None;
+
+    for y in 0..map.internal_height {
+        for x in 0..map.internal_width {
+            let pos = Pos { y: y as i32, x: x as i32 };
+            if map.tile_at(pos) != TileKind::DownStairs || !map.is_discovered(pos) || pos == start {
+                continue;
+            }
+
+            if let Some(path) = astar_path(map, start, pos) {
+                let len = path.len();
+                let is_better = match best_safe {
+                    None => true,
+                    Some((best_pos, best_len)) => {
+                        len < best_len || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
+                    }
+                };
+                if is_better {
+                    best_safe = Some((pos, len));
+                }
+            } else if let Some(path) = astar_path_allow_hazards(map, start, pos) {
+                let len = path.len();
+                let is_better = match best_hazard {
+                    None => true,
+                    Some((best_pos, best_len)) => {
+                        len < best_len || (len == best_len && (pos.y, pos.x) < (best_pos.y, best_pos.x))
+                    }
+                };
+                if is_better {
+                    best_hazard = Some((pos, len));
+                }
+            }
+        }
+    }
+
+    if let Some((target, len)) = best_safe {
+        return Some(AutoExploreIntent { target, reason: AutoReason::Frontier, path_len: len as u16 });
+    }
+    best_hazard.map(|(target, len)| AutoExploreIntent {
+        target,
         reason: AutoReason::ThreatAvoidance,
-        path_len: l as u16,
+        path_len: len as u16,
     })
 }
 
@@ -927,6 +1067,8 @@ fn draw_map_diag(map: &Map, player: Pos) -> String {
                 '#'
             } else if map.tile_at(p) == TileKind::ClosedDoor {
                 '+'
+            } else if map.tile_at(p) == TileKind::DownStairs {
+                '>'
             } else if is_safe_frontier_candidate(map, p) {
                 'F'
             } else {
@@ -1061,6 +1203,7 @@ mod tests {
         assert_eq!(game.state.map.tile_at(Pos { y: 5, x: 7 }), TileKind::Floor);
         assert_eq!(game.state.map.tile_at(Pos { y: 8, x: 11 }), TileKind::Floor);
         assert_eq!(game.state.map.tile_at(Pos { y: 9, x: 11 }), TileKind::Floor);
+        assert_eq!(game.state.map.tile_at(Pos { y: 11, x: 13 }), TileKind::DownStairs);
 
         for hazard in [Pos { y: 8, x: 11 }, Pos { y: 9, x: 11 }, Pos { y: 10, x: 11 }] {
             assert!(game.state.map.is_hazard(hazard), "expected hazard at {hazard:?}");
@@ -1095,6 +1238,12 @@ mod tests {
                     }
                     game.apply_choice(prompt_id, Choice::Fight).expect("fight choice should apply");
                 }
+                AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                    prompt_id, ..
+                }) => {
+                    game.apply_choice(prompt_id, Choice::Descend)
+                        .expect("descend choice should apply");
+                }
                 AdvanceStopReason::Finished(_) => break,
                 AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {
                 }
@@ -1105,6 +1254,126 @@ mod tests {
             saw_multi_enemy_interrupt,
             "expected at least one multi-enemy encounter interrupt in starter layout auto-flow; encounters={encounter_sizes:?}"
         );
+    }
+
+    #[test]
+    fn descending_from_floor_one_loads_floor_two_with_different_map_state() {
+        let mut game = Game::new(22222, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let floor_one_tiles = game.state.map.tiles.clone();
+        game.state.actors[game.state.player_id].pos = Pos { y: 11, x: 13 };
+
+        let prompt_id = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                current_floor,
+                next_floor,
+            }) => {
+                assert_eq!(current_floor, 1);
+                assert_eq!(next_floor, Some(2));
+                prompt_id
+            }
+            other => panic!("expected floor transition interrupt, got {other:?}"),
+        };
+
+        game.apply_choice(prompt_id, Choice::Descend).expect("descend should apply");
+        assert_eq!(game.state.floor_index, 2);
+        assert_ne!(floor_one_tiles, game.state.map.tiles);
+    }
+
+    #[test]
+    fn floor_index_never_decreases_during_play() {
+        let mut game = Game::new(33333, &ContentPack::default(), GameMode::Ironman);
+        let mut last_floor = game.state.floor_index;
+
+        for _ in 0..300 {
+            let result = game.advance(8);
+            match result.stop_reason {
+                AdvanceStopReason::Interrupted(Interrupt::LootFound { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::KeepLoot).expect("keep loot");
+                }
+                AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::Fight).expect("fight");
+                }
+                AdvanceStopReason::Interrupted(Interrupt::DoorBlocked { prompt_id, .. }) => {
+                    game.apply_choice(prompt_id, Choice::OpenDoor).expect("open door");
+                }
+                AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                    prompt_id, ..
+                }) => {
+                    game.apply_choice(prompt_id, Choice::Descend).expect("descend");
+                }
+                AdvanceStopReason::Finished(_) => break,
+                AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {
+                }
+            }
+
+            assert!(game.state.floor_index >= last_floor, "floor index should never decrease");
+            last_floor = game.state.floor_index;
+        }
+    }
+
+    #[test]
+    fn floor_transition_interrupt_uses_same_prompt_until_choice_is_applied() {
+        let mut game = Game::new(44444, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.state.actors[game.state.player_id].pos = Pos { y: 11, x: 13 };
+
+        let first_prompt = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition { prompt_id, .. }) => {
+                prompt_id
+            }
+            other => panic!("expected floor transition interrupt, got {other:?}"),
+        };
+
+        let second_prompt = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition { prompt_id, .. }) => {
+                prompt_id
+            }
+            other => panic!("expected floor transition interrupt while paused, got {other:?}"),
+        };
+
+        assert_eq!(first_prompt, second_prompt);
+        game.apply_choice(first_prompt, Choice::Descend).expect("descend should apply");
+        assert_eq!(game.state.floor_index, 2);
+    }
+
+    #[test]
+    fn run_does_not_end_only_because_tick_counter_grew() {
+        let mut game = Game::new(55555, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.tick = 401;
+
+        let result = game.advance(1);
+        assert!(
+            !matches!(result.stop_reason, AdvanceStopReason::Finished(_)),
+            "run should not auto-finish from tick count"
+        );
+    }
+
+    #[test]
+    fn planner_targets_known_downstairs_when_no_frontier_remains() {
+        let mut map = Map::new(12, 8);
+        for y in 1..(map.internal_height - 1) {
+            for x in 1..(map.internal_width - 1) {
+                map.set_tile(Pos { y: y as i32, x: x as i32 }, TileKind::Wall);
+            }
+        }
+        for x in 2..=9 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        let stairs = Pos { y: 4, x: 9 };
+        map.set_tile(stairs, TileKind::DownStairs);
+        map.discovered.fill(true);
+        map.visible.fill(true);
+
+        let start = Pos { y: 4, x: 3 };
+        let intent = choose_frontier_intent(&map, start).expect("stairs should be selected");
+        assert_eq!(intent.target, stairs);
     }
 
     #[test]

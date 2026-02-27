@@ -16,6 +16,7 @@ pub enum TileKind {
     Wall,
     Floor,
     ClosedDoor,
+    DownStairs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -36,6 +37,7 @@ pub enum Choice {
     Fight,
     Avoid,
     OpenDoor,
+    Descend,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +81,11 @@ pub enum Interrupt {
     DoorBlocked {
         prompt_id: ChoicePromptId,
         pos: Pos,
+    },
+    FloorTransition {
+        prompt_id: ChoicePromptId,
+        current_floor: u8,
+        next_floor: Option<u8>,
     },
 }
 
