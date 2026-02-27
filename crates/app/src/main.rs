@@ -146,6 +146,15 @@ async fn main() {
         let pos_threat = get_abs(l_threat, &[l_root, l_main, l_left, l_bottom]);
         let pos_event = get_abs(l_event, &[l_root, l_main]);
 
+        let border_color = Color::new(0.2, 0.2, 0.2, 1.0);
+        let border_thickness = 1.0;
+        draw_rectangle_lines(pos_status.0, pos_status.1, l_status.size.width, l_status.size.height, border_thickness, border_color);
+        draw_rectangle_lines(pos_map.0, pos_map.1, l_map.size.width, l_map.size.height, border_thickness, border_color);
+        draw_rectangle_lines(pos_stats.0, pos_stats.1, l_stats.size.width, l_stats.size.height, border_thickness, border_color);
+        draw_rectangle_lines(pos_policy.0, pos_policy.1, l_policy.size.width, l_policy.size.height, border_thickness, border_color);
+        draw_rectangle_lines(pos_threat.0, pos_threat.1, l_threat.size.width, l_threat.size.height, border_thickness, border_color);
+        draw_rectangle_lines(pos_event.0, pos_event.1, l_event.size.width, l_event.size.height, border_thickness, border_color);
+
         let line_height = 18.0;
 
         draw_ascii_map(&game, pos_map.0, pos_map.1, line_height);
