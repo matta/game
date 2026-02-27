@@ -18,16 +18,16 @@ Ensure a stable baseline and robust regression tests are in place to verify the 
 
 Replace the current loop of A* scans with the optimized single-source searches in `choose_frontier_intent`.
 
-- [ ] Task: Write failing unit tests for the new BFS/Dijkstra implementation using synthetic map fixtures in `crates/core/src/game.rs`:
-    - [ ] Test 1: Single-source Dijkstra correctly identifies distances to all reachable discovered tiles.
-    - [ ] Test 2: Safe frontier (no-hazard path) is preferred over a shorter hazard-containing path.
-    - [ ] Test 3: Hazard fallback is correctly triggered when no safe path to any frontier exists.
-- [ ] Task: Implement the optimized `choose_frontier_intent` using two primary BFS/Dijkstra passes:
-    - [ ] Implement Pass 1: Dijkstra over discovered walkable tiles avoiding hazards.
-    - [ ] Implement Pass 2: Dijkstra over all discovered walkable tiles allowing hazards (only if Pass 1 fails).
-- [ ] Task: Ensure deterministic neighbor expansion order (`Up, Right, Down, Left`) and target ranking (`lowest length`, then `y`, then `x`) are correctly applied in the new implementation.
-- [ ] Task: Run the newly written unit tests and confirm that the BFS/Dijkstra planner passes all scenarios.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md)
+- [x] Task: Write failing unit tests for the new BFS/Dijkstra implementation using synthetic map fixtures in `crates/core/src/game.rs`: 2f7bdee
+    - [x] Test 1: Single-source Dijkstra correctly identifies distances to all reachable discovered tiles.
+    - [x] Test 2: Safe frontier (no-hazard path) is preferred over a shorter hazard-containing path.
+    - [x] Test 3: Hazard fallback is correctly triggered when no safe path to any frontier exists.
+- [x] Task: Implement the optimized `choose_frontier_intent` using two primary BFS/Dijkstra passes: 2f7bdee
+    - [x] Implement Pass 1: Dijkstra over discovered walkable tiles avoiding hazards.
+    - [x] Implement Pass 2: Dijkstra over all discovered walkable tiles allowing hazards (only if Pass 1 fails).
+- [x] Task: Ensure deterministic neighbor expansion order (`Up, Right, Down, Left`) and target ranking (`lowest length`, then `y`, then `x`) are correctly applied in the new implementation. 2f7bdee
+- [x] Task: Run the newly written unit tests and confirm that the BFS/Dijkstra planner passes all scenarios. 2f7bdee
+- [x] Task: Conductor - User Manual Verification 'Phase 2' (Protocol in workflow.md) 2f7bdee
 
 ## Phase 3: Final Verification & Performance Validation
 
