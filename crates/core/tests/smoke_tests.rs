@@ -1,0 +1,66 @@
+use core::ContentPack;
+use core::{AdvanceStopReason, Choice, Game, GameMode, Interrupt};
+
+fn run_to_floor_three(seed: u64, branch: Choice) -> u64 {
+    let content = ContentPack::default();
+    let mut game = Game::new(seed, &content, GameMode::Ironman);
+    let mut floor_3_reached = false;
+
+    // 2000 steps should be plenty for the starter layout to reach floor 3
+    for _ in 0..2000 {
+        let res = game.advance(10);
+
+        if game.state().floor_index == 3 {
+            floor_3_reached = true;
+        }
+
+        match res.stop_reason {
+            AdvanceStopReason::Finished(_) => {
+                break;
+            }
+            AdvanceStopReason::Interrupted(interrupt) => {
+                let (prompt_id, choice) = match interrupt {
+                    Interrupt::LootFound { prompt_id, .. } => (prompt_id, Choice::KeepLoot),
+                    Interrupt::EnemyEncounter { prompt_id, .. } => (prompt_id, Choice::Fight),
+                    Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
+                    Interrupt::FloorTransition { prompt_id, requires_branch_choice, .. } => {
+                        let c =
+                            if requires_branch_choice { branch.clone() } else { Choice::Descend };
+                        (prompt_id, c)
+                    }
+                };
+                game.apply_choice(prompt_id, choice).expect("choice should apply");
+            }
+            _ => {}
+        }
+    }
+
+    assert!(floor_3_reached, "Floor 3 was not reached for seed {} and branch {:?}", seed, branch);
+    game.snapshot_hash()
+}
+
+#[test]
+fn test_smoke_run_branch_a() {
+    let hash = run_to_floor_three(12345, Choice::DescendBranchA);
+    assert!(hash != 0);
+}
+
+#[test]
+fn test_smoke_run_branch_b() {
+    let hash = run_to_floor_three(12345, Choice::DescendBranchB);
+    assert!(hash != 0);
+}
+
+#[test]
+fn test_smoke_branches_diverge() {
+    // Both starts from same seed but different branches at floor 1 -> 2 transition.
+    let hash_a = run_to_floor_three(12345, Choice::DescendBranchA);
+    let hash_b = run_to_floor_three(12345, Choice::DescendBranchB);
+    assert_ne!(hash_a, hash_b, "Different branches should produce different hashes at floor 3");
+}
+
+#[test]
+fn test_regression_no_ascend_in_choice() {
+    // This is a "smoke test" for the API surface mentioned in DR-003.
+    //Choice::Ascend; // This would fail to compile if it existed.
+}

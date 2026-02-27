@@ -73,6 +73,8 @@ async fn main() {
         draw_text(&status, 20.0, 30.0, 20.0, WHITE);
         draw_text(&format!("Tick: {}", game.current_tick()), 20.0, 350.0, 20.0, WHITE);
         draw_text(&format!("Seed: {run_seed}"), 20.0, 330.0, 20.0, WHITE);
+        draw_text(&format!("Floor: {} / 3", game.state().floor_index), 20.0, 310.0, 20.0, WHITE);
+        draw_text(&format!("Branch: {:?}", game.state().branch_profile), 20.0, 290.0, 20.0, WHITE);
 
         let intent_text = if let Some(intent) = game.state().auto_intent {
             format!(

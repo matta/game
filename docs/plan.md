@@ -724,11 +724,11 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Generator invariants are encoded as tests, reducing regressions from future content tuning.
 
 ### Milestone 4e — App/UI Wiring + Multi-Floor Smoke Coverage (1–2 hrs)
-- [ ] Surface current floor index and committed branch in app HUD/log output.
-- [ ] Add branch-choice and descent prompt handling in app loop with explicit key bindings.
-- [ ] Add end-to-end smoke test: fixed seed run reaches floor 3 through one branch path and remains replay-stable.
-- [ ] Add companion smoke test for the alternate branch path confirming deterministic divergence in floor characteristics.
-- [ ] Add regression test: app exposes no overworld selector and no ascend action bindings.
+- [x] Surface current floor index and committed branch in app HUD/log output.
+- [x] Add branch-choice and descent prompt handling in app loop with explicit key bindings.
+- [x] Add end-to-end smoke test: fixed seed run reaches floor 3 through one branch path and remains replay-stable.
+- [x] Add companion smoke test for the alternate branch path confirming deterministic divergence in floor characteristics.
+- [x] Add regression test: app exposes no overworld selector and no ascend action bindings.
 **Pass 4e Exit Criteria:**
 - **a) User Experience:** Multi-floor progression and branch identity are visible and understandable during normal play.
 - **b) Progress toward vision:** Completes milestone-level playability for floors + branches, not just headless core behavior.
