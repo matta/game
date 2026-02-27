@@ -750,12 +750,64 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Invariant stress testing is operational and wired into CI, protecting structural integrity continuously from future rapid prototyping and balance changes.
 
 ## Milestone 5 — Content Pass (15–18 hrs)
-- [ ] Implement topological floor generation: replace the placeholder MVP tunnel with random non-overlapping `Rect` room placement and deterministic corridor routing to create actual chokepoints.
-- [ ] 3–5 vault templates (e.g., Shrine rooms, Hazard corridors, Elite ambushes) stamped deterministically over the generated floors.
-- [ ] Populate `core::content`: ~15 items, ~10 perks, 2 gods.
-- [ ] 6–8 enemy types, 1 boss.
-- [ ] **Weirdness Quota:** At least 5 items that modify rule systems (not just stat sticks). At least 3 perks that alter core mechanics (timing, targeting, economy).
-**Exit Criteria:**
+
+Execution guardrails for all Milestone 5 passes:
+- [ ] Execute passes strictly in order: `5a -> 5b -> 5c -> 5d -> 5e`.
+- [ ] Use TDD in every pass: add failing test(s) first, then implement the minimum code to pass.
+- [ ] After each pass, run all required checks with no warnings/errors: `cargo fmt -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`.
+- [ ] Prefer plain English over cryptic variable names (as per project rules).
+
+### Milestone 5a — Topological Floor Generation (3–4 hrs)
+- [ ] Replace placeholder MVP tunnel with random non-overlapping `Rect` room placement.
+- [ ] Implement deterministic corridor routing to connect rooms, creating strategic chokepoints.
+- [ ] Ensure deterministic generation tied strictly to `(seed, floor_index, branch_profile)`.
+- [ ] Add unit tests: ensure fully connected graph (no isolated rooms) and deterministic map output for a given seed.
+**Pass 5a Exit Criteria:**
+- **a) User Experience:** Dungeon layouts feel like actual places with rooms and hallways, offering natural choke points and retreat vectors.
+- **b) Progress toward vision:** Realizes procedural dungeon structure over simple testing arenas.
+- **c) Architecture & Maintainability:** Continues to uphold strict determinism with solid coverage on generator connectivity.
+
+### Milestone 5b — Vault Templates & Room Features (3–4 hrs)
+- [ ] Implement deterministic stamping of 3–5 vault templates (e.g., Shrine rooms, Hazard corridors, Elite ambushes) over the generated floors.
+- [ ] Define rules to prevent vaults from overwriting the starting area or the exit stairs.
+- [ ] Add unit tests: vaults spawn reliably across seeds without breaking map connectivity.
+**Pass 5b Exit Criteria:**
+- **a) User Experience:** Specific rooms feel authored and intentionally dangerous or rewarding, breaking up procedural monotony.
+- **b) Progress toward vision:** Brings "authored rules, not handcrafted layouts" to life.
+- **c) Architecture & Maintainability:** The vault system operates predictably inside the deterministic generator flow.
+
+### Milestone 5c — Base Entities: Enemies and Bosses (3–4 hrs)
+- [ ] Populate `core::content` with 6–8 distinct enemy types (e.g., high-health brute, distant ranged, fast swarmer).
+- [ ] Implement 1 Boss enemy intended for the final floor.
+- [ ] Add deterministic spawn weighting for these new enemies across the floors.
+- [ ] Add unit tests: verify enemy properties and ensure deterministic spawn progression.
+**Pass 5c Exit Criteria:**
+- **a) User Experience:** Encounters require different policy approaches instead of a monolithic strategy.
+- **b) Progress toward vision:** Enemies begin to test the limits of the combat policy and positioning intent.
+- **c) Architecture & Maintainability:** Enemy definitions remain cleanly integrated with FOV/Pathing and testable.
+
+### Milestone 5d — Core Content: Items and Perks (4–5 hrs)
+- [ ] Populate `core::content` with ~15 distinct items.
+- [ ] Populate `core::content` with ~10 perks.
+- [ ] **Weirdness Quota (Items):** Implement at least 5 items that modify rule systems (e.g., swapping places, temporary obstacles, armor bypass), not just stat sticks.
+- [ ] **Weirdness Quota (Perks):** Implement at least 3 perks that alter core mechanics (timing, targeting, economy).
+- [ ] **Synergy Testing Strategy (Risk Mitigation):** Add test fixtures specifically combining "weird" items and perks to validate that unexpected positive synergies function correctly without engine crashes, addressing the "Synergy Testing Gap".
+**Pass 5d Exit Criteria:**
+- **a) User Experience:** Substantial content density. The player encounters items with weird, rule-breaking properties.
+- **b) Progress toward vision:** "Deep buildcrafting" (Vision 1.2) is tangibly achieved. Items feel unique, not like stat sticks (Vision 1.1).
+- **c) Architecture & Maintainability:** Proves viability of defining engine logic alongside content (DR-008). Validates that the engine hooks can support "weird" rules without massive refactoring or architectural friction.
+
+### Milestone 5e — Gods and Retreat Options (2–3 hrs)
+- [ ] Populate `core::content` with 2 passive Gods that provide run-shaping pacts or modifiers.
+- [ ] **Retreat Illusion (Risk Mitigation):** Ensure at least one item, perk, or god mechanic introduces a genuine escape vector (e.g., a "Blink" or displacement effect) to make fleeing a viable tactical policy.
+- [ ] Adjust item/enemy frequencies to ensure a playable 20-40 minute balance.
+- [ ] Add integration testing: end-to-end replay with the new combined content set.
+**Pass 5e Exit Criteria:**
+- **a) User Experience:** The game feels like a complete vertical slice of a roguelike with diverse builds and real escape options.
+- **b) Progress toward vision:** Validates that "Gods/pacts reshape runs" as intended.
+- **c) Architecture & Maintainability:** The engine proves stable and balanced even with all the new interacting components.
+
+**Milestone 5 Final Exit Criteria:**
 - **a) User Experience:** Substantial content density. The player encounters bosses, diverse enemies, and items with weird, rule-breaking properties, enabling wildly asymmetric build synergies.
 - **b) Progress toward vision:** "Deep buildcrafting" (Vision 1.2) is tangibly achieved. Items feel unique, not like stat sticks (Vision 1.1).
 - **c) Architecture & Maintainability:** Proves viability of defining engine logic alongside content (DR-008). Tests whether hardcoding item behaviors locally scales maintainably across the MVP boundaries.
