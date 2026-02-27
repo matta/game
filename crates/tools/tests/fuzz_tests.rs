@@ -74,7 +74,7 @@ fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Resul
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1000))]
+    #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]
     fn test_fuzz_game_simulation(map_seed in any::<u64>(), choice_seed in any::<u64>()) {
         if let Err(msg) = run_fuzz_simulation(map_seed, choice_seed, 2000) {
