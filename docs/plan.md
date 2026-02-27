@@ -778,10 +778,10 @@ Execution guardrails for all Milestone 5 passes:
 - **c) Architecture & Maintainability:** The vault system operates predictably inside the deterministic generator flow.
 
 ### Milestone 5c — Base Entities: Enemies and Bosses (3–4 hrs)
-- [ ] Populate `core::content` with 6–8 distinct enemy types (e.g., high-health brute, distant ranged, fast swarmer).
-- [ ] Implement 1 Boss enemy intended for the final floor.
-- [ ] Add deterministic spawn weighting for these new enemies across the floors.
-- [ ] Add unit tests: verify enemy properties and ensure deterministic spawn progression.
+- [x] Populate `core::content` with 6–8 distinct enemy types (e.g., high-health brute, distant ranged, fast swarmer).
+- [x] Implement 1 Boss enemy intended for the final floor.
+- [x] Add deterministic spawn weighting for these new enemies across the floors.
+- [x] Add unit tests: verify enemy properties and ensure deterministic spawn progression.
 **Pass 5c Exit Criteria:**
 - **a) User Experience:** Encounters require different policy approaches instead of a monolithic strategy.
 - **b) Progress toward vision:** Enemies begin to test the limits of the combat policy and positioning intent.

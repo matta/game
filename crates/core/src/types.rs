@@ -23,6 +23,13 @@ pub enum TileKind {
 pub enum ActorKind {
     Player,
     Goblin,
+    FeralHound,
+    BloodAcolyte,
+    CorruptedGuard,
+    LivingArmor,
+    Gargoyle,
+    ShadowStalker,
+    AbyssalWarden,
 }
 
 use serde::{Deserialize, Serialize};

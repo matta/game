@@ -1,3 +1,26 @@
+use crate::types::ActorKind;
+
+pub struct EnemyStats {
+    pub hp: i32,
+    pub attack: i32,
+    pub defense: i32,
+    pub speed: u32,
+}
+
+pub fn get_enemy_stats(kind: ActorKind) -> EnemyStats {
+    match kind {
+        ActorKind::Goblin => EnemyStats { hp: 10, attack: 2, defense: 0, speed: 12 },
+        ActorKind::FeralHound => EnemyStats { hp: 6, attack: 3, defense: 0, speed: 15 },
+        ActorKind::BloodAcolyte => EnemyStats { hp: 12, attack: 5, defense: 0, speed: 10 },
+        ActorKind::CorruptedGuard => EnemyStats { hp: 18, attack: 4, defense: 2, speed: 9 },
+        ActorKind::LivingArmor => EnemyStats { hp: 25, attack: 3, defense: 4, speed: 5 },
+        ActorKind::Gargoyle => EnemyStats { hp: 20, attack: 4, defense: 3, speed: 8 },
+        ActorKind::ShadowStalker => EnemyStats { hp: 14, attack: 4, defense: 1, speed: 12 },
+        ActorKind::AbyssalWarden => EnemyStats { hp: 80, attack: 8, defense: 3, speed: 9 },
+        ActorKind::Player => EnemyStats { hp: 20, attack: 5, defense: 0, speed: 10 },
+    }
+}
+
 pub struct Weapon {
     pub id: &'static str,
     pub name: &'static str,

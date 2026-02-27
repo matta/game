@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
 
-use crate::content::ContentPack;
+use crate::content::{get_enemy_stats, ContentPack};
 use crate::floor::{BranchProfile, MAX_FLOORS, STARTING_FLOOR_INDEX, generate_floor};
 use crate::state::{Actor, GameState, Item, Map};
 use crate::types::*;
@@ -81,62 +81,66 @@ impl Game {
         let player_id = actors.insert(player);
         actors[player_id].id = player_id;
 
+        let stats_a = get_enemy_stats(ActorKind::Goblin);
         let enemy_a = Actor {
             id: EntityId::default(),
             kind: ActorKind::Goblin,
             pos: Pos { y: 5, x: 11 },
-            hp: 10,
-            max_hp: 10,
-            attack: 2,
-            defense: 0,
+            hp: stats_a.hp,
+            max_hp: stats_a.hp,
+            attack: stats_a.attack,
+            defense: stats_a.defense,
             active_weapon_slot: WeaponSlot::Primary,
-            next_action_tick: 12,
-            speed: 12,
+            next_action_tick: stats_a.speed as u64,
+            speed: stats_a.speed,
         };
         let enemy_a_id = actors.insert(enemy_a);
         actors[enemy_a_id].id = enemy_a_id;
 
+        let stats_b = get_enemy_stats(ActorKind::Goblin);
         let enemy_b = Actor {
             id: EntityId::default(),
             kind: ActorKind::Goblin,
             pos: Pos { y: 11, x: 11 },
-            hp: 10,
-            max_hp: 10,
-            attack: 2,
-            defense: 0,
+            hp: stats_b.hp,
+            max_hp: stats_b.hp,
+            attack: stats_b.attack,
+            defense: stats_b.defense,
             active_weapon_slot: WeaponSlot::Primary,
-            next_action_tick: 12,
-            speed: 12,
+            next_action_tick: stats_b.speed as u64,
+            speed: stats_b.speed,
         };
         let enemy_b_id = actors.insert(enemy_b);
         actors[enemy_b_id].id = enemy_b_id;
 
+        let stats_c = get_enemy_stats(ActorKind::Goblin);
         let enemy_c = Actor {
             id: EntityId::default(),
             kind: ActorKind::Goblin,
             pos: Pos { y: 6, x: 10 },
-            hp: 10,
-            max_hp: 10,
-            attack: 2,
-            defense: 0,
+            hp: stats_c.hp,
+            max_hp: stats_c.hp,
+            attack: stats_c.attack,
+            defense: stats_c.defense,
             active_weapon_slot: WeaponSlot::Primary,
-            next_action_tick: 12,
-            speed: 12,
+            next_action_tick: stats_c.speed as u64,
+            speed: stats_c.speed,
         };
         let enemy_c_id = actors.insert(enemy_c);
         actors[enemy_c_id].id = enemy_c_id;
 
+        let stats_d = get_enemy_stats(ActorKind::Goblin);
         let enemy_d = Actor {
             id: EntityId::default(),
             kind: ActorKind::Goblin,
             pos: Pos { y: 7, x: 9 },
-            hp: 10,
-            max_hp: 10,
-            attack: 2,
-            defense: 0,
+            hp: stats_d.hp,
+            max_hp: stats_d.hp,
+            attack: stats_d.attack,
+            defense: stats_d.defense,
             active_weapon_slot: WeaponSlot::Primary,
-            next_action_tick: 12,
-            speed: 12,
+            next_action_tick: stats_d.speed as u64,
+            speed: stats_d.speed,
         };
         let enemy_d_id = actors.insert(enemy_d);
         actors[enemy_d_id].id = enemy_d_id;
@@ -647,17 +651,18 @@ impl Game {
         self.state.actors[player_id].pos = generated.entry_tile;
 
         for spawn in generated.enemy_spawns {
+            let stats = get_enemy_stats(spawn.kind);
             let enemy = Actor {
                 id: EntityId::default(),
                 kind: spawn.kind,
                 pos: spawn.pos,
-                hp: 10,
-                max_hp: 10,
-                attack: 2,
-                defense: 0,
+                hp: stats.hp,
+                max_hp: stats.hp,
+                attack: stats.attack,
+                defense: stats.defense,
                 active_weapon_slot: WeaponSlot::Primary,
-                next_action_tick: 12,
-                speed: 12,
+                next_action_tick: stats.speed as u64,
+                speed: stats.speed,
             };
             let enemy_id = self.state.actors.insert(enemy);
             self.state.actors[enemy_id].id = enemy_id;

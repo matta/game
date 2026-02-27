@@ -182,8 +182,25 @@ fn draw_ascii_map(game: &Game, left: f32, top: f32, line_height: f32) {
                     glyph = match actor.kind {
                         core::ActorKind::Player => "@",
                         core::ActorKind::Goblin => "g",
+                        core::ActorKind::FeralHound => "h",
+                        core::ActorKind::BloodAcolyte => "a",
+                        core::ActorKind::CorruptedGuard => "C",
+                        core::ActorKind::LivingArmor => "A",
+                        core::ActorKind::Gargoyle => "G",
+                        core::ActorKind::ShadowStalker => "S",
+                        core::ActorKind::AbyssalWarden => "W",
                     };
-                    final_color = if actor.kind == core::ActorKind::Player { GREEN } else { RED };
+                    final_color = match actor.kind {
+                        core::ActorKind::Player => GREEN,
+                        core::ActorKind::Goblin => RED,
+                        core::ActorKind::FeralHound => ORANGE,
+                        core::ActorKind::BloodAcolyte => RED,
+                        core::ActorKind::CorruptedGuard => BLUE,
+                        core::ActorKind::LivingArmor => LIGHTGRAY,
+                        core::ActorKind::Gargoyle => GRAY,
+                        core::ActorKind::ShadowStalker => PURPLE,
+                        core::ActorKind::AbyssalWarden => MAGENTA,
+                    };
                     break;
                 }
             }

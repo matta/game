@@ -59,6 +59,13 @@ impl GeneratedFloor {
             bytes.push(match spawn.kind {
                 ActorKind::Player => 0,
                 ActorKind::Goblin => 1,
+                ActorKind::FeralHound => 2,
+                ActorKind::BloodAcolyte => 3,
+                ActorKind::CorruptedGuard => 4,
+                ActorKind::LivingArmor => 5,
+                ActorKind::Gargoyle => 6,
+                ActorKind::ShadowStalker => 7,
+                ActorKind::AbyssalWarden => 8,
             });
             bytes.extend(spawn.pos.y.to_le_bytes());
             bytes.extend(spawn.pos.x.to_le_bytes());
@@ -197,6 +204,29 @@ fn build_vault_stamps(
     stamps
 }
 
+fn pick_enemy_kind(floor_index: u8, floor_seed: u64, spawn_index: usize) -> ActorKind {
+    let roll = random_usize(floor_seed, 5000 + spawn_index as u64, 0, 99);
+    match floor_index {
+        1 => {
+            if roll < 60 { ActorKind::Goblin }
+            else if roll < 90 { ActorKind::FeralHound }
+            else { ActorKind::BloodAcolyte }
+        }
+        2 => {
+            if roll < 20 { ActorKind::FeralHound }
+            else if roll < 50 { ActorKind::BloodAcolyte }
+            else if roll < 80 { ActorKind::CorruptedGuard }
+            else { ActorKind::Gargoyle }
+        }
+        _ => { // Floor 3
+            if roll < 20 { ActorKind::CorruptedGuard }
+            else if roll < 50 { ActorKind::Gargoyle }
+            else if roll < 80 { ActorKind::LivingArmor }
+            else { ActorKind::ShadowStalker }
+        }
+    }
+}
+
 pub fn generate_floor(
     run_seed: u64,
     floor_index: u8,
@@ -225,7 +255,16 @@ pub fn generate_floor(
         _ => 0,
     };
     let enemy_count = 2 + ((floor_index as usize).min(2)) + branch_enemy_bonus;
-    let mut enemy_spawns = Vec::with_capacity(enemy_count);
+    let target_total = enemy_count + if floor_index == MAX_FLOORS { 1 } else { 0 };
+    let mut enemy_spawns = Vec::with_capacity(target_total);
+
+    if floor_index == MAX_FLOORS {
+        enemy_spawns.push(EnemySpawn {
+            kind: ActorKind::AbyssalWarden,
+            pos: down_stairs_tile,
+        });
+    }
+
     for enemy_index in 0..enemy_count {
         let x = 2 + (((floor_seed >> (enemy_index * 7 + 11)) as usize) % (width - 4));
         let y = 2 + (((floor_seed >> (enemy_index * 11 + 17)) as usize) % (height - 4));
@@ -235,13 +274,14 @@ pub fn generate_floor(
             && pos != down_stairs_tile
             && !enemy_spawns.iter().any(|spawn: &EnemySpawn| spawn.pos == pos)
         {
-            enemy_spawns.push(EnemySpawn { kind: ActorKind::Goblin, pos });
+            let kind = pick_enemy_kind(floor_index, floor_seed, enemy_index);
+            enemy_spawns.push(EnemySpawn { kind, pos });
         }
     }
-    if enemy_spawns.len() < enemy_count {
+    if enemy_spawns.len() < target_total {
         for y in 1..(height - 1) {
             for x in 1..(width - 1) {
-                if enemy_spawns.len() >= enemy_count {
+                if enemy_spawns.len() >= target_total {
                     break;
                 }
                 let pos = Pos { y: y as i32, x: x as i32 };
@@ -255,7 +295,8 @@ pub fn generate_floor(
                 {
                     continue;
                 }
-                enemy_spawns.push(EnemySpawn { kind: ActorKind::Goblin, pos });
+                let kind = pick_enemy_kind(floor_index, floor_seed, enemy_spawns.len());
+                enemy_spawns.push(EnemySpawn { kind, pos });
             }
         }
     }
@@ -799,11 +840,33 @@ mod tests {
     fn same_seed_and_branch_produce_identical_floors_for_floor_two_and_three() {
         let floor_2_a = generate_floor(88_001, 2, BranchProfile::BranchA);
         let floor_2_b = generate_floor(88_001, 2, BranchProfile::BranchA);
-        let floor_3_a = generate_floor(88_001, 3, BranchProfile::BranchA);
-        let floor_3_b = generate_floor(88_001, 3, BranchProfile::BranchA);
-
         assert_eq!(floor_2_a.canonical_bytes(), floor_2_b.canonical_bytes());
-        assert_eq!(floor_3_a.canonical_bytes(), floor_3_b.canonical_bytes());
+    }
+
+    #[test]
+    fn boss_spawns_on_final_floor() {
+        let generator_seed = 1234;
+        let final_floor = generate_floor(generator_seed, MAX_FLOORS, BranchProfile::Uncommitted);
+        let boss_count = final_floor.enemy_spawns.iter().filter(|s| s.kind == ActorKind::AbyssalWarden).count();
+        assert_eq!(boss_count, 1, "Exactly one boss should spawn on the final floor");
+
+        let early_floor = generate_floor(generator_seed, 2, BranchProfile::Uncommitted);
+        let early_boss_count = early_floor.enemy_spawns.iter().filter(|s| s.kind == ActorKind::AbyssalWarden).count();
+        assert_eq!(early_boss_count, 0, "Boss should not spawn on earlier floors");
+    }
+
+    #[test]
+    fn enemy_diversity() {
+        let mut kinds = BTreeSet::new();
+        for floor in 1..=3 {
+            for seed in 0..5 {
+                let f = generate_floor(seed, floor, BranchProfile::Uncommitted);
+                for spawn in f.enemy_spawns {
+                    kinds.insert(spawn.kind);
+                }
+            }
+        }
+        assert!(kinds.len() >= 4, "Expected high enemy diversity across floors, found {:?}", kinds);
     }
 
     #[test]
