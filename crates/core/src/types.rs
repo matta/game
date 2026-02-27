@@ -58,8 +58,15 @@ pub enum Choice {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeathCause {
+    /// Player died because HP reached zero from direct damage.
     Damage,
+    /// Player died because poison damage reduced HP to zero.
     Poison,
+    /// Guardrail defeat used to stop an unintended no-progress loop.
+    ///
+    /// This should not happen in normal gameplay. If it appears, treat it as
+    /// a bug in map generation or decision logic that left no valid path
+    /// forward.
     StalledNoProgress,
 }
 

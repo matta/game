@@ -750,14 +750,41 @@ impl Game {
                 }
                 keys::CONSUMABLE_FORTIFICATION_SCROLL => {
                     let player_pos = self.state.actors[self.state.player_id].pos;
+                    let occupied_positions: BTreeSet<Pos> =
+                        self.state.actors.values().map(|actor| actor.pos).collect();
+                    let mut fortified_map = self.state.map.clone();
+                    let mut reachable_before =
+                        reachable_discovered_walkable_tiles(&fortified_map, player_pos);
+                    let had_intent_before =
+                        choose_frontier_intent(&fortified_map, player_pos).is_some();
+
                     for neighbor in neighbors(player_pos) {
-                        if self.state.map.is_discovered_walkable(neighbor)
-                            && self.state.map.tile_at(neighbor) != TileKind::DownStairs
-                            && !self.state.actors.values().any(|actor| actor.pos == neighbor)
+                        if !fortified_map.is_discovered_walkable(neighbor)
+                            || fortified_map.tile_at(neighbor) == TileKind::DownStairs
+                            || occupied_positions.contains(&neighbor)
+                            || is_frontier_candidate(&fortified_map, neighbor)
                         {
-                            self.state.map.set_tile(neighbor, TileKind::Wall);
+                            continue;
+                        }
+
+                        let original_tile = fortified_map.tile_at(neighbor);
+                        fortified_map.set_tile(neighbor, TileKind::Wall);
+
+                        let reachable_after =
+                            reachable_discovered_walkable_tiles(&fortified_map, player_pos);
+                        let preserves_reachable_component = reachable_before
+                            .iter()
+                            .all(|pos| *pos == neighbor || reachable_after.contains(pos));
+                        let preserves_progress_intent = !had_intent_before
+                            || choose_frontier_intent(&fortified_map, player_pos).is_some();
+
+                        if preserves_reachable_component && preserves_progress_intent {
+                            reachable_before = reachable_after;
+                        } else {
+                            fortified_map.set_tile(neighbor, original_tile);
                         }
                     }
+                    self.state.map = fortified_map;
                     let r = self.get_fov_radius();
                     compute_fov(
                         &mut self.state.map,
@@ -1203,6 +1230,27 @@ fn path_for_intent(map: &Map, start: Pos, intent: AutoExploreIntent) -> Option<V
         AutoReason::ThreatAvoidance => astar_path_allow_hazards(map, start, intent.target),
         _ => astar_path(map, start, intent.target),
     }
+}
+
+fn reachable_discovered_walkable_tiles(map: &Map, start: Pos) -> BTreeSet<Pos> {
+    let mut visited = BTreeSet::new();
+    if !map.is_discovered_walkable(start) {
+        return visited;
+    }
+
+    let mut queue = VecDeque::new();
+    visited.insert(start);
+    queue.push_back(start);
+
+    while let Some(current) = queue.pop_front() {
+        for neighbor in neighbors(current) {
+            if map.is_discovered_walkable(neighbor) && visited.insert(neighbor) {
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    visited
 }
 
 fn astar_path(map: &Map, start: Pos, goal: Pos) -> Option<Vec<Pos>> {
@@ -2776,12 +2824,6 @@ mod tests {
         }
     }
 
-    fn choose<T: Clone>(rng: &mut ChaCha8Rng, slice: &[T]) -> T {
-        use rand_chacha::rand_core::Rng;
-        let p = rng.next_u64() as usize % slice.len();
-        slice[p].clone()
-    }
-
     #[test]
     fn fortification_scroll_never_walls_tile_occupied_by_actor() {
         let mut game = Game::new(1234, &ContentPack::default(), GameMode::Ironman);
@@ -2801,6 +2843,37 @@ mod tests {
             "fortification should not convert actor-occupied tiles into walls"
         );
         assert_eq!(game.state.actors[enemy_id].pos, enemy_pos);
+    }
+
+    #[test]
+    fn fortification_scroll_preserves_an_adjacent_escape_tile() {
+        let mut game = Game::new(1234, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+
+        let mut map = Map::new(9, 9);
+        for y in 1..8 {
+            for x in 1..8 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        game.state.map = map;
+
+        let player_pos = Pos { y: 4, x: 4 };
+        game.state.actors[game.state.player_id].pos = player_pos;
+
+        game.apply_item_effect(ItemKind::Consumable(keys::CONSUMABLE_FORTIFICATION_SCROLL));
+
+        let adjacent_walkable_count = neighbors(player_pos)
+            .into_iter()
+            .filter(|neighbor| game.state.map.is_discovered_walkable(*neighbor))
+            .count();
+        assert!(
+            adjacent_walkable_count >= 1,
+            "fortification must keep at least one adjacent walkable escape tile"
+        );
     }
 
     #[test]
@@ -2905,80 +2978,4 @@ mod tests {
         assert_eq!(left, vec![Pos { y: 4, x: 5 }, Pos { y: 4, x: 6 }]);
     }
 
-    #[test]
-    fn test_repro_fuzz_stall() {
-        let map_seed = 3168286118010506022;
-        let choice_seed = 5538911673549072552;
-        let max_ticks = 2000;
-
-        let content = ContentPack::default();
-        let mut game = Game::new(map_seed, &content, GameMode::Ironman);
-        let mut rng = ChaCha8Rng::seed_from_u64(choice_seed);
-
-        let mut total_steps = 0;
-        let mut stalled_tick = None;
-        while total_steps < max_ticks {
-            let result = game.advance(10);
-            total_steps += result.simulated_ticks;
-
-            match result.stop_reason {
-                AdvanceStopReason::Finished(outcome) => {
-                    if let RunOutcome::Defeat(DeathCause::StalledNoProgress) = outcome {
-                        stalled_tick = Some(game.current_tick());
-                        println!("STALL DETECTED at tick {}", game.current_tick());
-                        let player_pos = game.state().actors[game.state().player_id].pos;
-                        println!("Player pos: {:?}", player_pos);
-                        println!("Auto Intent: {:?}", game.state().auto_intent);
-                        // Print neighbors and if they are discovered/walkable
-                        for n in neighbors(player_pos) {
-                            println!(
-                                "Neighbor {:?}: discovered={}, walkable={}, tile={:?}",
-                                n,
-                                game.state().map.is_discovered(n),
-                                game.state().map.is_discovered_walkable(n),
-                                game.state().map.tile_at(n)
-                            );
-                        }
-                        break;
-                    }
-                    break;
-                }
-                AdvanceStopReason::Interrupted(interrupt) => {
-                    let (prompt_id, choice) = match interrupt {
-                        Interrupt::EnemyEncounter { prompt_id, .. } => (
-                            prompt_id,
-                            choose(&mut rng, &[Choice::Fight, Choice::Avoid, Choice::Fight]),
-                        ),
-                        Interrupt::LootFound { prompt_id, .. } => {
-                            (prompt_id, choose(&mut rng, &[Choice::KeepLoot, Choice::DiscardLoot]))
-                        }
-                        Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
-                        Interrupt::FloorTransition {
-                            prompt_id, requires_branch_choice, ..
-                        } => {
-                            if requires_branch_choice {
-                                (
-                                    prompt_id,
-                                    choose(
-                                        &mut rng,
-                                        &[Choice::DescendBranchA, Choice::DescendBranchB],
-                                    ),
-                                )
-                            } else {
-                                (prompt_id, Choice::Descend)
-                            }
-                        }
-                    };
-                    game.apply_choice(prompt_id, choice).expect("applied invalid choice");
-                }
-                _ => {}
-            }
-        }
-        let stalled_tick =
-            stalled_tick.expect("expected deterministic stall outcome for repro seed");
-        assert!(
-            stalled_tick <= 256,
-            "stall watchdog should terminate repro quickly, got tick {stalled_tick}"
-        );
-    }
 }
