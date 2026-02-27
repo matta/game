@@ -490,7 +490,7 @@ async fn main() {
 **Exit Criteria:**
 - **a) User Experience:** A rudimentary static ASCII grid appears, rendering a player, an enemy, and simulating an interrupt. Visuals are purely functional debug outputs.
 - **b) Progress toward vision:** Validates the strict turn-based simulation model (Vision 2.3) and the technical constraint of seed-based determinism (Vision 6.4).
-- **c) Architecture & Maintainability:** The generative arena memory management (`slotmap`) is in place. Crucially, the headless replay API and determinism contract are proven strong, meaning any future bug can be perfectly reproduced by copying the input journal.
+- **c) Architecture & Maintainability:** The generative arena memory management (`slotmap`) is in place. Crucially, the headless replay API and determinism contract are proven strong, meaning any future bug can be perfectly reproduced by replaying the input journal.
 
 ## Milestone 2a — Basic Pathing & Interrupt Loop (10–12 hrs)
 - [x] Add `core` test fixtures/helpers to build tiny discovered/walkable map layouts for pathing/frontier tests.
@@ -815,14 +815,140 @@ Execution guardrails for all Milestone 5 passes:
 - **c) Architecture & Maintainability:** Proves viability of defining engine logic alongside content (DR-008). Tests whether hardcoding item behaviors locally scales maintainably across the MVP boundaries.
 
 ## Milestone 6 — Fairness Tooling (8–10 hrs)
+Execution guardrails for all Milestone 6 passes:
+- [ ] Execute passes strictly in order: `6a -> 6b -> 6c -> 6d -> 6e -> 6f`.
+- [ ] Use TDD in every pass: add failing test(s) first, then implement the minimum code to pass.
+- [ ] After each pass, run all required checks with no warnings/errors: `cargo fmt -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`.
+- [ ] Keep all `core`-side iteration deterministic (stable ordering and deterministic tie-break rules).
+
+### Milestone 6a — Threat Tags + Static Encounter Facts (1–2 hrs)
+- [ ] Extend `ThreatSummary` in `crates/core/src/types.rs` with deterministic static facts:
+  - [ ] `visible_enemy_count: usize`
+  - [ ] `nearest_enemy_distance: Option<u32>`
+  - [ ] `primary_enemy_kind: ActorKind`
+- [ ] In `crates/core/src/game.rs`, replace ad-hoc Goblin-only tagging with a deterministic per-`ActorKind` tag map.
+- [ ] Keep `danger_tags` deterministically sorted + deduplicated before storing in `ThreatSummary`.
+- [ ] Update `Interrupt::EnemyEncounter` construction to populate all new `ThreatSummary` fields.
+- [ ] Update threat text rendering in `crates/app/src/main.rs::prompt_text` to include enemy count and nearest distance.
+- [ ] Add/adjust tests in `crates/core/src/types.rs` and `crates/core/src/game.rs`:
+  - [ ] Tag ordering remains deterministic.
+  - [ ] New static fact fields are correct for a known fixture encounter.
+**Pass 6a Exit Criteria:**
+- **a) User Experience:** Encounter prompts communicate clear, static threat facts (not opaque warnings).
+- **b) Progress toward vision:** Improves explainability of policy outcomes without adding tactical forecasting complexity.
+- **c) Architecture & Maintainability:** Threat summary contract is explicit, test-backed, and deterministic.
+
+### Milestone 6b — Seed Display (0.5–1 hr)
+- [ ] Keep seed visible in HUD at all times in `crates/app/src/main.rs`.
+- [ ] Normalize seed rendering to exact decimal string format (no prefixes/suffixes).
+- [ ] Add a small unit test for seed text formatting helper in `crates/app/src/lib.rs`.
+**Pass 6b Exit Criteria:**
+- **a) User Experience:** Player can always see the exact seed for the current run.
+- **b) Progress toward vision:** Supports "no opaque randomness" by making run identity explicit.
+- **c) Architecture & Maintainability:** Seed formatting behavior is isolated and test-covered.
+
+### Milestone 6c — Determinism Hash Surfacing + Crash-Recovery State File (2 hrs)
+- [ ] In `crates/app/src/main.rs`, render `snapshot_hash` in HUD in fixed hex format (16 hex digits).
+- [ ] Hash text format is exact `0x` + 16 lowercase hex digits.
+- [ ] Add run diagnostics state module in `crates/app/src/run_state_file.rs`.
+- [ ] Persist diagnostics to a JSON file at relative path `./.game_state/last_run_state.json`.
+- [ ] Define exact JSON schema (versioned, no optional required fields):
+  - [ ] `format_version: 1`
+  - [ ] `run_seed: u64`
+  - [ ] `snapshot_hash_hex: String` (exactly `0x` + 16 lowercase hex digits)
+  - [ ] `tick: u64`
+  - [ ] `floor_index: u8`
+  - [ ] `branch_profile: String`
+  - [ ] `active_god: String` (use `"none"` when no god selected yet)
+  - [ ] `updated_at_unix_ms: u64`
+- [ ] Update diagnostics file write timing in app loop:
+  - [ ] Write once immediately after game creation (seed known, initial hash).
+  - [ ] Write after each `app_state.tick(...)` call so latest seed/hash survives crash.
+  - [ ] Use atomic write (`.tmp` file + rename) to avoid partial/corrupt JSON on crash.
+- [ ] Add startup recovery behavior in `crates/app/src/main.rs`:
+  - [ ] On launch, attempt to read `./.game_state/last_run_state.json`.
+  - [ ] If read succeeds, show one-line HUD recovery hint: `Recovered last run: seed=<seed> hash=<hash>`.
+- [ ] Add deterministic test coverage in `crates/app/src/lib.rs` or dedicated app tests:
+  - [ ] JSON roundtrip test for `RunStateFile`.
+  - [ ] Atomic writer test (final file exists and parses; no `.tmp` residue after success).
+  - [ ] Startup recovery parser test for valid + missing file.
+- [ ] Add deterministic test in `crates/core/tests/determinism.rs`:
+  - [ ] For a fixed seed + scripted input policy, final snapshot hash is stable across two identical runs.
+**Pass 6c Exit Criteria:**
+- **a) User Experience:** Player can always see current seed/hash and recover last run diagnostics after a crash.
+- **b) Progress toward vision:** Strengthens deterministic repro/debug workflow, including post-crash recovery.
+- **c) Architecture & Maintainability:** Hash/seed visibility and crash-recoverable persistence are standardized and regression-tested.
+
+### Milestone 6d — Death Recap UI + Reason Codes (1–2 hrs)
+- [ ] In `crates/app/src/app_loop.rs`, stop panicking on `AdvanceStopReason::EngineFailure`.
+- [ ] Extend app completion state to represent both:
+  - [ ] Normal run outcomes (`Victory`, `Defeat(DeathCause)`)
+  - [ ] Engine failures (`EngineFailureReason`)
+- [ ] In `crates/app/src/main.rs`, replace generic finished text with a recap block including:
+  - [ ] Reason code (exact string mapping):
+    - [ ] `WIN_CLEAR`
+    - [ ] `DMG_HP_ZERO`
+    - [ ] `PSN_HP_ZERO`
+    - [ ] `ENG_STALLED_NO_PROGRESS`
+  - [ ] Seed
+  - [ ] Snapshot hash
+  - [ ] Floor / Branch / God
+  - [ ] Tick
+  - [ ] Latest 5 threat-trace rows
+- [ ] Add app tests in `crates/app/tests/app_mode.rs`:
+  - [ ] Finished mode triggers for normal run completion.
+  - [ ] Finished mode triggers for engine failure (no panic).
+**Pass 6d Exit Criteria:**
+- **a) User Experience:** Defeat and failure states are explicit and understandable, not ambiguous.
+- **b) Progress toward vision:** Reinforces "lethal but fair" by explaining what happened.
+- **c) Architecture & Maintainability:** Reason-code mapping is centralized and test-covered.
+
+### Milestone 6e — Frontier Planner Performance Pass (2–3 hrs)
+- [ ] In `crates/core/src/game.rs`, replace per-candidate A* scans in `choose_frontier_intent` with two single-source searches:
+  - [ ] Pass 1: BFS/Dijkstra over discovered walkable tiles avoiding hazards.
+  - [ ] Pass 2: BFS/Dijkstra allowing hazards.
+- [ ] Preserve deterministic neighbor expansion order `Up, Right, Down, Left`.
+- [ ] Preserve current target ranking semantics:
+  - [ ] Lowest path length first
+  - [ ] Tie-break by `(y, x)`
+  - [ ] Closed-door target reason remains `AutoReason::Door`
+  - [ ] Hazard fallback reason remains `AutoReason::ThreatAvoidance`
+- [ ] Keep movement execution pathing logic unchanged (`path_for_intent` still drives actual step path).
+- [ ] Add targeted regression tests in `crates/core/src/game.rs`:
+  - [ ] Safe frontier preferred over hazard frontier.
+  - [ ] Hazard fallback used when only hazard path exists.
+  - [ ] Deterministic tie-break with equal distances remains stable.
+**Pass 6e Exit Criteria:**
+- **a) User Experience:** Auto-explore remains behaviorally consistent while feeling more responsive.
+- **b) Progress toward vision:** Keeps trust in auto policy routing while reducing algorithmic waste.
+- **c) Architecture & Maintainability:** Planner complexity drops from repeated A* scans to linear graph passes.
+
+### Milestone 6f — ASCII Render Complexity Pass (1–2 hrs)
+- [ ] In `crates/app/src/main.rs::draw_ascii_map`, remove per-cell scans over all items/actors.
+- [ ] Add one-pass overlay builders:
+  - [ ] `item_overlay` indexed by map cell (`Option<glyph,color>`)
+  - [ ] `actor_overlay` indexed by map cell (`Option<glyph,color>`)
+- [ ] Preserve existing visual precedence:
+  - [ ] Actor glyph overrides item glyph
+  - [ ] Item glyph overrides tile glyph
+- [ ] Keep hidden/undiscovered behavior unchanged.
+- [ ] Add a focused test helper in `crates/app/src/lib.rs` for overlay precedence rules.
+- [ ] Add/adjust app tests to verify overlay precedence deterministically for a synthetic fixture.
+**Pass 6f Exit Criteria:**
+- **a) User Experience:** Rendering remains identical while reducing frame-time work.
+- **b) Progress toward vision:** Supports smooth desktop play during long auto batches.
+- **c) Architecture & Maintainability:** Render path complexity is explicitly `O(MapCells + Entities)` and test-backed.
+
+Milestone 6 task completion checklist:
 - [ ] Refine threat tags and static encounter facts.
-- [ ] Seed display + copy.
+- [ ] Seed display.
 - [ ] Determinism hash.
+- [ ] Persist seed + snapshot hash to `./.game_state/last_run_state.json` with crash-recoverable startup readback.
 - [ ] Death-recap UI using reason codes from Milestone 3.
 - [ ] Replace repeated per-candidate A* frontier scans with a single-pass BFS/Dijkstra nearest-frontier search.
 - [ ] Reduce ASCII render complexity from per-cell entity scanning to an `O(MapCells + Entities)` pass (spatial lookup or per-entity overlay pass).
 **Exit Criteria:**
-- **a) User Experience:** Gameplay feels meticulously fair. The player can easily copy a run seed and review exact reason codes for their death.
+- **a) User Experience:** Gameplay feels meticulously fair. The player can easily view and recover a run seed/hash and review exact reason codes for their death.
 - **b) Progress toward vision:** "Lethal-but-fair gameplay" and "No opaque randomness" (Vision 1.4, 8.5) physically realized.
 - **c) Architecture & Maintainability:** Deepens determinism tooling. Ensures the game is fundamentally debuggable using player-submitted crash seeds as reliable regression tests.
 
