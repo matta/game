@@ -1221,9 +1221,6 @@ fn find_nearest_frontier(map: &Map, start: Pos, avoid_hazards: bool) -> Option<A
     if !map.is_discovered_walkable(start) {
         return None;
     }
-    if avoid_hazards && map.is_hazard(start) {
-        return None;
-    }
 
     let mut visited = BTreeMap::new();
     let mut queue = VecDeque::new();
@@ -1242,7 +1239,7 @@ fn find_nearest_frontier(map: &Map, start: Pos, avoid_hazards: bool) -> Option<A
             }
         }
 
-        if is_frontier_candidate(map, current) {
+        if current != start && is_frontier_candidate(map, current) {
             let is_better = match best_target {
                 None => true,
                 Some((best_dist, best_pos)) => {
@@ -1303,9 +1300,6 @@ fn find_nearest_downstairs(map: &Map, start: Pos, avoid_hazards: bool) -> Option
     if !map.is_discovered_walkable(start) {
         return None;
     }
-    if avoid_hazards && map.is_hazard(start) {
-        return None;
-    }
 
     let mut visited = BTreeMap::new();
     let mut queue = VecDeque::new();
@@ -1324,7 +1318,7 @@ fn find_nearest_downstairs(map: &Map, start: Pos, avoid_hazards: bool) -> Option
             }
         }
 
-        if map.tile_at(current) == TileKind::DownStairs && map.is_discovered(current) && current != start {
+        if current != start && map.tile_at(current) == TileKind::DownStairs && map.is_discovered(current) {
             let is_better = match best_target {
                 None => true,
                 Some((best_dist, best_pos)) => {
