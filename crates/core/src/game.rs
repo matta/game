@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque, btree_map::Entry};
 
 use rand_chacha::ChaCha8Rng;
 use rand_chacha::rand_core::SeedableRng;
@@ -1203,6 +1203,12 @@ fn danger_tags_for_kind(kind: ActorKind) -> Vec<DangerTag> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutoSearchTarget {
+    Frontier,
+    Downstairs,
+}
+
 fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
     // Pass 1: BFS/Dijkstra avoiding hazards.
     if let Some(intent) = find_nearest_frontier(map, start, true) {
@@ -1218,68 +1224,7 @@ fn choose_frontier_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
 }
 
 fn find_nearest_frontier(map: &Map, start: Pos, avoid_hazards: bool) -> Option<AutoExploreIntent> {
-    if !map.is_discovered_walkable(start) {
-        return None;
-    }
-
-    let mut visited = BTreeMap::new();
-    let mut queue = VecDeque::new();
-
-    visited.insert(start, 0u16);
-    queue.push_back(start);
-
-    let mut best_target: Option<(u16, Pos)> = None;
-
-    while let Some(current) = queue.pop_front() {
-        let dist = *visited.get(&current).unwrap();
-
-        if let Some((best_dist, _)) = best_target {
-            if dist > best_dist {
-                break;
-            }
-        }
-
-        if current != start && is_frontier_candidate(map, current) {
-            let is_better = match best_target {
-                None => true,
-                Some((best_dist, best_pos)) => {
-                    dist < best_dist
-                        || (dist == best_dist && (current.y, current.x) < (best_pos.y, best_pos.x))
-                }
-            };
-            if is_better {
-                best_target = Some((dist, current));
-            }
-        }
-
-        // Neighbors in deterministic order: Up, Right, Down, Left
-        for neighbor in neighbors(current) {
-            if !map.is_discovered_walkable(neighbor) {
-                continue;
-            }
-            if avoid_hazards && map.is_hazard(neighbor) {
-                continue;
-            }
-            // Closed doors block transit.
-            if map.tile_at(current) == TileKind::ClosedDoor {
-                continue;
-            }
-
-            if !visited.contains_key(&neighbor) {
-                visited.insert(neighbor, dist + 1);
-                queue.push_back(neighbor);
-            }
-        }
-    }
-
-    best_target.map(|(dist, target)| {
-        let reason = if map.tile_at(target) == TileKind::ClosedDoor {
-            AutoReason::Door
-        } else {
-            AutoReason::Frontier
-        };
-        AutoExploreIntent { target, reason, path_len: dist }
-    })
+    find_nearest_auto_target(map, start, avoid_hazards, AutoSearchTarget::Frontier)
 }
 
 fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> {
@@ -1296,7 +1241,20 @@ fn choose_downstairs_intent(map: &Map, start: Pos) -> Option<AutoExploreIntent> 
     None
 }
 
-fn find_nearest_downstairs(map: &Map, start: Pos, avoid_hazards: bool) -> Option<AutoExploreIntent> {
+fn find_nearest_downstairs(
+    map: &Map,
+    start: Pos,
+    avoid_hazards: bool,
+) -> Option<AutoExploreIntent> {
+    find_nearest_auto_target(map, start, avoid_hazards, AutoSearchTarget::Downstairs)
+}
+
+fn find_nearest_auto_target(
+    map: &Map,
+    start: Pos,
+    avoid_hazards: bool,
+    target_kind: AutoSearchTarget,
+) -> Option<AutoExploreIntent> {
     if !map.is_discovered_walkable(start) {
         return None;
     }
@@ -1312,13 +1270,22 @@ fn find_nearest_downstairs(map: &Map, start: Pos, avoid_hazards: bool) -> Option
     while let Some(current) = queue.pop_front() {
         let dist = *visited.get(&current).unwrap();
 
-        if let Some((best_dist, _)) = best_target {
-            if dist > best_dist {
-                break;
-            }
+        if let Some((best_dist, _)) = best_target
+            && dist > best_dist
+        {
+            break;
         }
 
-        if current != start && map.tile_at(current) == TileKind::DownStairs && map.is_discovered(current) {
+        let is_target = match target_kind {
+            AutoSearchTarget::Frontier => current != start && is_frontier_candidate(map, current),
+            AutoSearchTarget::Downstairs => {
+                current != start
+                    && map.tile_at(current) == TileKind::DownStairs
+                    && map.is_discovered(current)
+            }
+        };
+
+        if is_target {
             let is_better = match best_target {
                 None => true,
                 Some((best_dist, best_pos)) => {
@@ -1344,17 +1311,25 @@ fn find_nearest_downstairs(map: &Map, start: Pos, avoid_hazards: bool) -> Option
                 continue;
             }
 
-            if !visited.contains_key(&neighbor) {
-                visited.insert(neighbor, dist + 1);
+            if let Entry::Vacant(entry) = visited.entry(neighbor) {
+                entry.insert(dist + 1);
                 queue.push_back(neighbor);
             }
         }
     }
 
-    best_target.map(|(dist, target)| AutoExploreIntent {
-        target,
-        reason: AutoReason::Frontier,
-        path_len: dist,
+    best_target.map(|(dist, target)| {
+        let reason = match target_kind {
+            AutoSearchTarget::Frontier => {
+                if map.tile_at(target) == TileKind::ClosedDoor {
+                    AutoReason::Door
+                } else {
+                    AutoReason::Frontier
+                }
+            }
+            AutoSearchTarget::Downstairs => AutoReason::Frontier,
+        };
+        AutoExploreIntent { target, reason, path_len: dist }
     })
 }
 
@@ -2319,6 +2294,66 @@ mod tests {
         let start = Pos { y: 4, x: 3 };
         let intent = choose_frontier_intent(&map, start).expect("stairs should be selected");
         assert_eq!(intent.target, stairs);
+    }
+
+    #[test]
+    fn downstairs_prefers_nearest_then_y_x_tie_break() {
+        // Nearest downstairs should win.
+        let mut map = Map::new(12, 8);
+        for y in 1..(map.internal_height - 1) {
+            for x in 1..(map.internal_width - 1) {
+                map.set_tile(Pos { y: y as i32, x: x as i32 }, TileKind::Wall);
+            }
+        }
+        for x in 2..=9 {
+            map.set_tile(Pos { y: 4, x }, TileKind::Floor);
+        }
+        let near_stairs = Pos { y: 4, x: 4 };
+        let far_stairs = Pos { y: 4, x: 8 };
+        map.set_tile(near_stairs, TileKind::DownStairs);
+        map.set_tile(far_stairs, TileKind::DownStairs);
+        map.discovered.fill(true);
+        map.visible.fill(true);
+
+        let start = Pos { y: 4, x: 2 };
+        let nearest_intent = choose_downstairs_intent(&map, start).expect("stairs should be found");
+        assert_eq!(nearest_intent.target, near_stairs);
+        assert_eq!(nearest_intent.path_len, 2);
+        assert_eq!(nearest_intent.reason, AutoReason::Frontier);
+
+        // If downstairs are tied by distance, pick lowest (y, x).
+        let mut tie_map = Map::new(11, 11);
+        for y in 1..10 {
+            for x in 1..10 {
+                tie_map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        let top_stairs = Pos { y: 3, x: 5 };
+        let bottom_stairs = Pos { y: 5, x: 3 };
+        tie_map.set_tile(top_stairs, TileKind::DownStairs);
+        tie_map.set_tile(bottom_stairs, TileKind::DownStairs);
+        tie_map.discovered.fill(true);
+        tie_map.visible.fill(true);
+
+        let tie_start = Pos { y: 4, x: 4 };
+        let tie_intent =
+            choose_downstairs_intent(&tie_map, tie_start).expect("tied stairs should be found");
+        assert_eq!(tie_intent.target, top_stairs);
+        assert_eq!(tie_intent.path_len, 2);
+        assert_eq!(tie_intent.reason, AutoReason::Frontier);
+    }
+
+    #[test]
+    fn downstairs_hazard_fallback_reports_threat_avoidance() {
+        let (mut map, start) = hazard_lane_fixture();
+        let stairs = Pos { y: 4, x: 5 };
+        map.set_tile(stairs, TileKind::DownStairs);
+        map.set_hazard(Pos { y: 4, x: 4 }, true);
+
+        let intent = choose_downstairs_intent(&map, start).expect("hazard fallback intent");
+        assert_eq!(intent.target, stairs);
+        assert_eq!(intent.path_len, 3);
+        assert_eq!(intent.reason, AutoReason::ThreatAvoidance);
     }
 
     #[test]
@@ -3436,7 +3471,7 @@ mod tests {
         assert_eq!(intent.target, Pos { y: 4, x: 5 });
 
         // 4. Scenarios with closed doors.
-        let (mut map, start, door) = closed_door_choke_fixture();
+        let (map, start, door) = closed_door_choke_fixture();
         // door is a frontier candidate because its neighbor is unknown.
         let intent = choose_frontier_intent(&map, start).expect("door frontier should be found");
         assert_eq!(intent.target, door);
@@ -3446,7 +3481,7 @@ mod tests {
     #[test]
     fn choose_frontier_intent_optimized_behavior() {
         // These tests will initially fail until choose_frontier_intent is optimized.
-        // But since we are replacing the internal implementation, we can use the same 
+        // But since we are replacing the internal implementation, we can use the same
         // public API tests to verify the new behavior.
 
         // 1. Dijkstra correctly identifies distances.

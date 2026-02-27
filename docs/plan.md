@@ -1083,3 +1083,26 @@ This is a calculated risk. It borders on "OOP morass" where entities own their o
 **Context:** The `Policy` struct initially included `loadout_rule` (when to swap weapons) and `consume_hp_threshold` (when to automatically drink a potion).
 **Decision:** Cut full evaluator AI and loadout swapping, but retain soft, rigid auto-consumption (`auto_heal_if_below_threshold: Option<u8>`). Auto-consumption is highly constrained: it triggers only once per encounter, requires a matching potion type, and never triggers during multi-enemy combats unless retreating.
 **Rationale:** Building an AI logic block to safely evaluate when it is "worth" spending a turn to swap a weapon or drink a limited consumable is complex and brittle. However, completely removing auto-consumption reintroduces tactical micromanagement, violating the core "policy over micromanagement" vision. By allowing a single, deterministic heuristic for emergency potion usage, we preserve the policy fantasy, maintain low implementation complexity, and avoid forcing the player to manually drink potions every fight.
+
+## 14. Active Task Tracking
+
+### Shared Auto-Target BFS Refactor (Frontier + Downstairs)
+- [x] Add downstairs-focused test coverage (`downstairs_prefers_nearest_then_y_x_tie_break`, `downstairs_hazard_fallback_reports_threat_avoidance`).
+- [x] Introduce shared internal search target enum and helper in `crates/core/src/game.rs`.
+- [x] Refactor `find_nearest_frontier` and `find_nearest_downstairs` to thin wrappers over shared BFS code.
+- [x] Keep deterministic behavior unchanged (neighbor order, tie-breaks, hazard filtering, closed-door transit rules).
+- [x] Run validation gates with no warnings/errors:
+  - [x] `cargo fmt -- --check`
+  - [x] `cargo clippy --all-targets --all-features -- -D warnings`
+  - [x] `cargo test`
+
+Final checklist for this task:
+- [x] Use @docs/plan.md for planning
+- [x] Keep @docs/plan.md checkmarks up to date.
+- [x] Use a TDD approach to implement new features, and fix bugs.
+- [x] Ensure the following pass with no warnings or errors:
+  - [x] `cargo clippy --all-targets --all-features -- -D warnings`
+  - [x] `cargo test`
+  - [x] `cargo fmt -- --check`
+- [x] Prefer "Plain English" and jargon-free explanations in documentation, comments, names in code, and commit messages.
+- [x] Avoid cryptic variable names; prefer words.
