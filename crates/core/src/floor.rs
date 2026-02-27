@@ -5,6 +5,10 @@ use crate::{
 
 pub const MAX_FLOORS: u8 = 5;
 pub const STARTING_FLOOR_INDEX: u8 = 1;
+const BASE_ENEMY_COUNT_BY_FLOOR: [usize; MAX_FLOORS as usize] = [3, 4, 4, 4, 4];
+const ITEM_SPAWN_ATTEMPTS_BY_FLOOR: [usize; MAX_FLOORS as usize] = [1, 1, 1, 2, 2];
+const ITEM_ROLL_WEAPON_THRESHOLD: usize = 22;
+const ITEM_ROLL_CONSUMABLE_THRESHOLD: usize = 72;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BranchProfile {
@@ -271,8 +275,8 @@ fn pick_enemy_kind(floor_index: u8, floor_seed: u64, spawn_index: usize) -> Acto
 fn pick_item_kind(_floor_index: u8, floor_seed: u64, spawn_index: usize) -> ItemKind {
     let roll = random_usize(floor_seed, 6000 + spawn_index as u64, 0, 99);
 
-    // 25% Weapon, 45% Consumable, 30% Perk
-    if roll < 25 {
+    // 22% Weapon, 50% Consumable, 28% Perk
+    if roll < ITEM_ROLL_WEAPON_THRESHOLD {
         let w_roll = random_usize(floor_seed, 6001 + spawn_index as u64, 0, 99);
         match w_roll % 5 {
             0 => ItemKind::Weapon(keys::WEAPON_RUSTY_SWORD),
@@ -281,7 +285,7 @@ fn pick_item_kind(_floor_index: u8, floor_seed: u64, spawn_index: usize) -> Item
             3 => ItemKind::Weapon(keys::WEAPON_PHASE_DAGGER),
             _ => ItemKind::Weapon(keys::WEAPON_BLOOD_AXE),
         }
-    } else if roll < 70 {
+    } else if roll < ITEM_ROLL_CONSUMABLE_THRESHOLD {
         let c_roll = random_usize(floor_seed, 6002 + spawn_index as u64, 0, 99);
         match c_roll % 10 {
             0 => ItemKind::Consumable(keys::CONSUMABLE_MINOR_HP_POT),
@@ -339,7 +343,10 @@ pub fn generate_floor(
         BranchProfile::BranchA if floor_index > STARTING_FLOOR_INDEX => 1,
         _ => 0,
     };
-    let enemy_count = 2 + ((floor_index as usize).min(2)) + branch_enemy_bonus;
+    let floor_slot = floor_index.saturating_sub(STARTING_FLOOR_INDEX) as usize;
+    let base_enemy_count =
+        BASE_ENEMY_COUNT_BY_FLOOR[floor_slot.min(BASE_ENEMY_COUNT_BY_FLOOR.len() - 1)];
+    let enemy_count = base_enemy_count + branch_enemy_bonus;
     let target_total = enemy_count + if floor_index == MAX_FLOORS { 1 } else { 0 };
     let mut enemy_spawns = Vec::with_capacity(target_total);
 
@@ -348,8 +355,10 @@ pub fn generate_floor(
     }
 
     for enemy_index in 0..enemy_count {
-        let x = 2 + (((floor_seed >> (enemy_index * 7 + 11)) as usize) % (width - 4));
-        let y = 2 + (((floor_seed >> (enemy_index * 11 + 17)) as usize) % (height - 4));
+        let enemy_x_shift = ((enemy_index * 7 + 11) % 64) as u32;
+        let enemy_y_shift = ((enemy_index * 11 + 17) % 64) as u32;
+        let x = 2 + ((floor_seed.rotate_right(enemy_x_shift) as usize) % (width - 4));
+        let y = 2 + ((floor_seed.rotate_right(enemy_y_shift) as usize) % (height - 4));
         let pos =
             nearest_walkable_floor_tile(&tiles, width, height, Pos { y: y as i32, x: x as i32 });
         if manhattan(pos, entry_tile) > 1
@@ -384,15 +393,27 @@ pub fn generate_floor(
     }
     enemy_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x, spawn.kind));
 
-    let mut item_spawns = Vec::new();
-    let item_target = Pos {
-        y: (2 + ((floor_seed as usize >> 6) % (height - 4))) as i32,
-        x: (2 + ((floor_seed as usize >> 2) % (width - 4))) as i32,
-    };
-    let item_pos = nearest_walkable_floor_tile(&tiles, width, height, item_target);
-    if item_pos != entry_tile && item_pos != down_stairs_tile {
-        item_spawns
-            .push(ItemSpawn { kind: pick_item_kind(floor_index, floor_seed, 0), pos: item_pos });
+    let mut item_spawns: Vec<ItemSpawn> = Vec::new();
+    let item_spawn_attempts =
+        ITEM_SPAWN_ATTEMPTS_BY_FLOOR[floor_slot.min(ITEM_SPAWN_ATTEMPTS_BY_FLOOR.len() - 1)];
+    for item_index in 0..item_spawn_attempts {
+        let item_y_shift = ((6 + item_index * 4) % 64) as u32;
+        let item_x_shift = ((2 + item_index * 6) % 64) as u32;
+        let item_target = Pos {
+            y: (2 + ((floor_seed.rotate_right(item_y_shift) as usize) % (height - 4))) as i32,
+            x: (2 + ((floor_seed.rotate_right(item_x_shift) as usize) % (width - 4))) as i32,
+        };
+        let item_pos = nearest_walkable_floor_tile(&tiles, width, height, item_target);
+        if item_pos != entry_tile
+            && item_pos != down_stairs_tile
+            && !item_spawns.iter().any(|spawn| spawn.pos == item_pos)
+            && !enemy_spawns.iter().any(|spawn| spawn.pos == item_pos)
+        {
+            item_spawns.push(ItemSpawn {
+                kind: pick_item_kind(floor_index, floor_seed, item_index),
+                pos: item_pos,
+            });
+        }
     }
     item_spawns.sort_by_key(|spawn| (spawn.pos.y, spawn.pos.x, spawn.kind));
 

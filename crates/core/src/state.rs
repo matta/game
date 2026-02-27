@@ -163,6 +163,7 @@ pub struct GameState {
     pub sanctuary_active: bool,
     pub floor_index: u8,
     pub branch_profile: BranchProfile,
+    pub active_god: Option<GodId>,
     pub auto_intent: Option<AutoExploreIntent>,
     pub policy: Policy,
     pub threat_trace: VecDeque<ThreatTrace>,

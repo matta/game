@@ -1,7 +1,7 @@
 use core::ContentPack;
 use core::{AdvanceStopReason, Choice, Game, GameMode, Interrupt};
 
-fn run_to_floor_five(seed: u64, branch: Choice) -> u64 {
+fn run_to_floor_five(seed: u64, branch_and_god: Choice) -> u64 {
     let content = ContentPack::default();
     let mut game = Game::new(seed, &content, GameMode::Ironman);
     let mut floor_5_reached = false;
@@ -23,9 +23,14 @@ fn run_to_floor_five(seed: u64, branch: Choice) -> u64 {
                     Interrupt::LootFound { prompt_id, .. } => (prompt_id, Choice::KeepLoot),
                     Interrupt::EnemyEncounter { prompt_id, .. } => (prompt_id, Choice::Fight),
                     Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
-                    Interrupt::FloorTransition { prompt_id, requires_branch_choice, .. } => {
-                        let c =
-                            if requires_branch_choice { branch.clone() } else { Choice::Descend };
+                    Interrupt::FloorTransition {
+                        prompt_id, requires_branch_god_choice, ..
+                    } => {
+                        let c = if requires_branch_god_choice {
+                            branch_and_god.clone()
+                        } else {
+                            Choice::Descend
+                        };
                         (prompt_id, c)
                     }
                 };
@@ -35,27 +40,31 @@ fn run_to_floor_five(seed: u64, branch: Choice) -> u64 {
         }
     }
 
-    assert!(floor_5_reached, "Floor 5 was not reached for seed {} and branch {:?}", seed, branch);
+    assert!(
+        floor_5_reached,
+        "Floor 5 was not reached for seed {} and branch+god {:?}",
+        seed, branch_and_god
+    );
     game.snapshot_hash()
 }
 
 #[test]
 fn test_smoke_run_branch_a() {
-    let hash = run_to_floor_five(12345, Choice::DescendBranchA);
+    let hash = run_to_floor_five(12345, Choice::DescendBranchAVeil);
     assert!(hash != 0);
 }
 
 #[test]
 fn test_smoke_run_branch_b() {
-    let hash = run_to_floor_five(12345, Choice::DescendBranchB);
+    let hash = run_to_floor_five(12345, Choice::DescendBranchBForge);
     assert!(hash != 0);
 }
 
 #[test]
 fn test_smoke_branches_diverge() {
     // Both starts from same seed but different branches at floor 1 -> 2 transition.
-    let hash_a = run_to_floor_five(12345, Choice::DescendBranchA);
-    let hash_b = run_to_floor_five(12345, Choice::DescendBranchB);
+    let hash_a = run_to_floor_five(12345, Choice::DescendBranchAVeil);
+    let hash_b = run_to_floor_five(12345, Choice::DescendBranchBForge);
     assert_ne!(hash_a, hash_b, "Different branches should produce different hashes at floor 5");
 }
 

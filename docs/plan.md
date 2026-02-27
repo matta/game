@@ -800,10 +800,10 @@ Execution guardrails for all Milestone 5 passes:
 - **c) Architecture & Maintainability:** Proves viability of defining engine logic alongside content (DR-008). Validates that the engine hooks can support "weird" rules without massive refactoring or architectural friction.
 
 ### Milestone 5e — Gods and Retreat Options (2–3 hrs)
-- [ ] Populate `core::content` with 2 passive Gods that provide run-shaping pacts or modifiers.
-- [ ] **Retreat Illusion (Risk Mitigation):** Ensure at least one item, perk, or god mechanic introduces a genuine escape vector (e.g., a "Blink" or displacement effect) to make fleeing a viable tactical policy.
-- [ ] Adjust item/enemy frequencies to ensure a playable 20-40 minute balance.
-- [ ] Add integration testing: end-to-end replay with the new combined content set.
+- [x] Populate `core::content` with 2 passive Gods that provide run-shaping pacts or modifiers.
+- [x] **Retreat Illusion (Risk Mitigation):** Ensure at least one item, perk, or god mechanic introduces a genuine escape vector (e.g., a "Blink" or displacement effect) to make fleeing a viable tactical policy.
+- [x] Adjust item/enemy frequencies to ensure a playable 20-40 minute balance.
+- [x] Add integration testing: end-to-end replay with the new combined content set.
 **Pass 5e Exit Criteria:**
 - **a) User Experience:** The game feels like a complete vertical slice of a roguelike with diverse builds and real escape options.
 - **b) Progress toward vision:** Validates that "Gods/pacts reshape runs" as intended.

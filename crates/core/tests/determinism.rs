@@ -17,9 +17,11 @@ fn build_scripted_journal(seed: u64, content: &ContentPack) -> InputJournal {
                     Interrupt::LootFound { prompt_id, .. } => (prompt_id, Choice::KeepLoot),
                     Interrupt::EnemyEncounter { prompt_id, .. } => (prompt_id, Choice::Fight),
                     Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
-                    Interrupt::FloorTransition { prompt_id, requires_branch_choice, .. } => {
-                        let choice = if requires_branch_choice {
-                            Choice::DescendBranchA
+                    Interrupt::FloorTransition {
+                        prompt_id, requires_branch_god_choice, ..
+                    } => {
+                        let choice = if requires_branch_god_choice {
+                            Choice::DescendBranchAVeil
                         } else {
                             Choice::Descend
                         };
@@ -97,11 +99,11 @@ fn test_deterministic_smoke_fixed_seed_stable_intent_and_log_sequence() {
                 }
                 AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
                     prompt_id,
-                    requires_branch_choice,
+                    requires_branch_god_choice,
                     ..
                 }) => {
-                    let choice = if requires_branch_choice {
-                        Choice::DescendBranchA
+                    let choice = if requires_branch_god_choice {
+                        Choice::DescendBranchAVeil
                     } else {
                         Choice::Descend
                     };
@@ -153,11 +155,14 @@ fn test_starter_layout_auto_run_hits_door_and_threat_avoidance_within_250_ticks(
             }
             AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
                 prompt_id,
-                requires_branch_choice,
+                requires_branch_god_choice,
                 ..
             }) => {
-                let choice =
-                    if requires_branch_choice { Choice::DescendBranchA } else { Choice::Descend };
+                let choice = if requires_branch_god_choice {
+                    Choice::DescendBranchAVeil
+                } else {
+                    Choice::Descend
+                };
                 game.apply_choice(prompt_id, choice)
                     .expect("descend should apply during smoke run");
             }

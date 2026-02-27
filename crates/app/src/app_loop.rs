@@ -146,15 +146,25 @@ impl AppState {
                             self.mode = if resume { AppMode::AutoPlay } else { AppMode::Paused };
                         }
                     }
-                    Interrupt::FloorTransition { requires_branch_choice, .. } => {
-                        if *requires_branch_choice {
-                            if keys_pressed.contains(&KeyCode::A) {
-                                game.apply_choice(id, core::Choice::DescendBranchA)
+                    Interrupt::FloorTransition { requires_branch_god_choice, .. } => {
+                        if *requires_branch_god_choice {
+                            if keys_pressed.contains(&KeyCode::Key1) {
+                                game.apply_choice(id, core::Choice::DescendBranchAVeil)
                                     .expect("Failed to apply pending choice");
                                 self.mode =
                                     if resume { AppMode::AutoPlay } else { AppMode::Paused };
-                            } else if keys_pressed.contains(&KeyCode::B) {
-                                game.apply_choice(id, core::Choice::DescendBranchB)
+                            } else if keys_pressed.contains(&KeyCode::Key2) {
+                                game.apply_choice(id, core::Choice::DescendBranchAForge)
+                                    .expect("Failed to apply pending choice");
+                                self.mode =
+                                    if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                            } else if keys_pressed.contains(&KeyCode::Key3) {
+                                game.apply_choice(id, core::Choice::DescendBranchBVeil)
+                                    .expect("Failed to apply pending choice");
+                                self.mode =
+                                    if resume { AppMode::AutoPlay } else { AppMode::Paused };
+                            } else if keys_pressed.contains(&KeyCode::Key4) {
+                                game.apply_choice(id, core::Choice::DescendBranchBForge)
                                     .expect("Failed to apply pending choice");
                                 self.mode =
                                     if resume { AppMode::AutoPlay } else { AppMode::Paused };

@@ -54,6 +54,16 @@ pub enum Choice {
     Descend,
     DescendBranchA,
     DescendBranchB,
+    DescendBranchAVeil,
+    DescendBranchAForge,
+    DescendBranchBVeil,
+    DescendBranchBForge,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GodId {
+    Veil,
+    Forge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,7 +120,7 @@ pub enum Interrupt {
         prompt_id: ChoicePromptId,
         current_floor: u8,
         next_floor: Option<u8>,
-        requires_branch_choice: bool,
+        requires_branch_god_choice: bool,
     },
 }
 

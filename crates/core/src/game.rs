@@ -26,7 +26,7 @@ enum PendingPromptKind {
     FloorTransition {
         current_floor: u8,
         next_floor: Option<u8>,
-        requires_branch_choice: bool,
+        requires_branch_god_choice: bool,
     },
 }
 
@@ -223,6 +223,7 @@ impl Game {
                 sanctuary_active: false,
                 floor_index: STARTING_FLOOR_INDEX,
                 branch_profile: BranchProfile::Uncommitted,
+                active_god: None,
                 auto_intent: None,
                 policy: Policy::default(),
                 threat_trace: VecDeque::new(),
@@ -246,6 +247,57 @@ impl Game {
         } else {
             FOV_RADIUS
         }
+    }
+
+    fn effective_player_defense(&self) -> i32 {
+        let mut defense = self.state.actors[self.state.player_id].defense;
+        if self.state.active_perks.contains(&keys::PERK_IRON_WILL) {
+            defense += 2;
+        }
+        if self.state.active_perks.contains(&keys::PERK_RECKLESS_STRIKE) {
+            defense -= 2;
+        }
+        match self.state.policy.stance {
+            Stance::Aggressive => defense -= 1,
+            Stance::Balanced => {}
+            Stance::Defensive => defense += 2,
+        }
+        if self.state.active_god == Some(GodId::Forge) {
+            defense += 2;
+        }
+        defense
+    }
+
+    fn choose_blink_destination(&self, player_pos: Pos, avoid_hazards: bool) -> Option<Pos> {
+        let occupied: BTreeSet<Pos> = self.state.actors.values().map(|actor| actor.pos).collect();
+        let mut best: Option<(u32, Pos)> = None;
+        for y in (player_pos.y - 3)..=(player_pos.y + 3) {
+            for x in (player_pos.x - 3)..=(player_pos.x + 3) {
+                let pos = Pos { y, x };
+                if !self.state.map.is_discovered_walkable(pos)
+                    || self.state.map.tile_at(pos) == TileKind::ClosedDoor
+                    || occupied.contains(&pos)
+                {
+                    continue;
+                }
+                if avoid_hazards && self.state.map.is_hazard(pos) {
+                    continue;
+                }
+                let distance = manhattan(player_pos, pos);
+                let is_better = match best {
+                    None => true,
+                    Some((best_distance, best_pos)) => {
+                        distance > best_distance
+                            || (distance == best_distance
+                                && (pos.y, pos.x) < (best_pos.y, best_pos.x))
+                    }
+                };
+                if is_better {
+                    best = Some((distance, pos));
+                }
+            }
+        }
+        best.map(|(_, pos)| pos)
     }
 
     pub fn advance(&mut self, max_steps: u32) -> AdvanceResult {
@@ -420,7 +472,7 @@ impl Game {
             }
             (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Fight) => {
                 let mut p_attack = self.state.actors[self.state.player_id].attack;
-                let mut _p_defense = self.state.actors[self.state.player_id].defense;
+                let _player_defense = self.effective_player_defense();
 
                 let equipped = self.active_player_weapon();
                 let ignores_armor = equipped == Some(keys::WEAPON_PHASE_DAGGER);
@@ -440,12 +492,8 @@ impl Game {
                     }
                 }
 
-                if self.state.active_perks.contains(&keys::PERK_IRON_WILL) {
-                    _p_defense += 2;
-                }
                 if self.state.active_perks.contains(&keys::PERK_RECKLESS_STRIKE) {
                     p_attack += 4;
-                    _p_defense -= 2;
                 }
                 if self.state.active_perks.contains(&keys::PERK_BERSERKER_RHYTHM)
                     && equipped.is_none()
@@ -456,12 +504,10 @@ impl Game {
                 match self.state.policy.stance {
                     Stance::Aggressive => {
                         p_attack += 2;
-                        _p_defense -= 1;
                     }
                     Stance::Balanced => {}
                     Stance::Defensive => {
                         p_attack -= 1;
-                        _p_defense += 2;
                     }
                 }
 
@@ -494,25 +540,19 @@ impl Game {
                 true
             }
             (PendingPromptKind::EnemyEncounter { primary_enemy, .. }, Choice::Avoid) => {
-                if self.state.active_perks.contains(&keys::PERK_SHADOW_STEP) {
-                    let player_pos = self.state.actors[self.state.player_id].pos;
-                    let mut best_pos = player_pos;
-                    let mut max_dist = 0;
-                    for y in (player_pos.y - 3)..=(player_pos.y + 3) {
-                        for x in (player_pos.x - 3)..=(player_pos.x + 3) {
-                            let p = Pos { y, x };
-                            if self.state.map.is_discovered_walkable(p)
-                                && !self.state.actors.values().any(|a| a.pos == p)
-                                && self.state.map.tile_at(p) != TileKind::ClosedDoor
-                            {
-                                let d = manhattan(player_pos, p);
-                                if d > max_dist {
-                                    max_dist = d;
-                                    best_pos = p;
-                                }
-                            }
-                        }
+                let player_pos = self.state.actors[self.state.player_id].pos;
+                if self.state.active_god == Some(GodId::Veil) {
+                    if let Some(best_pos) = self.choose_blink_destination(player_pos, true) {
+                        self.state.actors.get_mut(self.state.player_id).unwrap().pos = best_pos;
+                        let r = self.get_fov_radius();
+                        compute_fov(&mut self.state.map, best_pos, r);
+                        self.suppressed_enemy = None;
+                    } else {
+                        self.suppressed_enemy = Some(primary_enemy);
                     }
+                } else if self.state.active_perks.contains(&keys::PERK_SHADOW_STEP) {
+                    let best_pos =
+                        self.choose_blink_destination(player_pos, false).unwrap_or(player_pos);
                     self.state.actors.get_mut(self.state.player_id).unwrap().pos = best_pos;
                     let r = self.get_fov_radius();
                     compute_fov(&mut self.state.map, best_pos, r);
@@ -532,35 +572,65 @@ impl Game {
                 PendingPromptKind::FloorTransition {
                     current_floor,
                     next_floor,
-                    requires_branch_choice,
+                    requires_branch_god_choice,
                 },
                 choice,
             ) if matches!(
                 choice,
-                Choice::Descend | Choice::DescendBranchA | Choice::DescendBranchB
+                Choice::Descend
+                    | Choice::DescendBranchAVeil
+                    | Choice::DescendBranchAForge
+                    | Choice::DescendBranchBVeil
+                    | Choice::DescendBranchBForge
             ) =>
             {
                 if self.state.floor_index != current_floor {
                     return Err(GameError::InvalidChoice);
                 }
-                if requires_branch_choice
-                    && !matches!(choice, Choice::DescendBranchA | Choice::DescendBranchB)
+                if requires_branch_god_choice
+                    && !matches!(
+                        choice,
+                        Choice::DescendBranchAVeil
+                            | Choice::DescendBranchAForge
+                            | Choice::DescendBranchBVeil
+                            | Choice::DescendBranchBForge
+                    )
                 {
                     return Err(GameError::InvalidChoice);
                 }
-                if !requires_branch_choice
-                    && matches!(choice, Choice::DescendBranchA | Choice::DescendBranchB)
-                {
+                if !requires_branch_god_choice && !matches!(choice, Choice::Descend) {
                     return Err(GameError::InvalidChoice);
                 }
                 match &choice {
-                    Choice::DescendBranchA => {
+                    Choice::DescendBranchAVeil => {
                         self.state.branch_profile = BranchProfile::BranchA;
+                        self.state.active_god = Some(GodId::Veil);
                     }
-                    Choice::DescendBranchB => {
+                    Choice::DescendBranchAForge => {
+                        self.state.branch_profile = BranchProfile::BranchA;
+                        self.state.active_god = Some(GodId::Forge);
+                    }
+                    Choice::DescendBranchBVeil => {
                         self.state.branch_profile = BranchProfile::BranchB;
+                        self.state.active_god = Some(GodId::Veil);
+                    }
+                    Choice::DescendBranchBForge => {
+                        self.state.branch_profile = BranchProfile::BranchB;
+                        self.state.active_god = Some(GodId::Forge);
+                    }
+                    Choice::Descend => {
+                        if self.state.branch_profile == BranchProfile::Uncommitted
+                            || self.state.active_god.is_none()
+                        {
+                            return Err(GameError::InvalidChoice);
+                        }
                     }
                     _ => {}
+                }
+                if requires_branch_god_choice && self.state.active_god == Some(GodId::Forge) {
+                    let player = self.state.actors.get_mut(self.state.player_id).unwrap();
+                    player.max_hp += 2;
+                    player.hp = (player.hp + 2).min(player.max_hp);
                 }
                 if self.state.active_perks.contains(&keys::PERK_PACIFISTS_BOUNTY)
                     && self.state.kills_this_floor == 0
@@ -636,6 +706,11 @@ impl Game {
             BranchProfile::Uncommitted => 0,
             BranchProfile::BranchA => 1,
             BranchProfile::BranchB => 2,
+        });
+        hasher.write_u8(match self.state.active_god {
+            None => 0,
+            Some(GodId::Veil) => 1,
+            Some(GodId::Forge) => 2,
         });
         let player = &self.state.actors[self.state.player_id];
         hasher.write_i32(player.pos.x);
@@ -917,15 +992,16 @@ impl Game {
         } else {
             None
         };
-        let requires_branch_choice = self.state.floor_index == STARTING_FLOOR_INDEX
+        let requires_branch_god_choice = self.state.floor_index == STARTING_FLOOR_INDEX
             && self.state.branch_profile == BranchProfile::Uncommitted
+            && self.state.active_god.is_none()
             && next_floor.is_some();
         let prompt = PendingPrompt {
             id: ChoicePromptId(self.next_input_seq),
             kind: PendingPromptKind::FloorTransition {
                 current_floor: self.state.floor_index,
                 next_floor,
-                requires_branch_choice,
+                requires_branch_god_choice,
             },
         };
         self.pending_prompt = Some(prompt.clone());
@@ -1008,12 +1084,12 @@ impl Game {
             PendingPromptKind::FloorTransition {
                 current_floor,
                 next_floor,
-                requires_branch_choice,
+                requires_branch_god_choice,
             } => Interrupt::FloorTransition {
                 prompt_id: prompt.id,
                 current_floor,
                 next_floor,
-                requires_branch_choice,
+                requires_branch_god_choice,
             },
         }
     }
@@ -1703,9 +1779,9 @@ mod tests {
                 ) => {
                     let choice = if matches!(
                         int,
-                        Interrupt::FloorTransition { requires_branch_choice: true, .. }
+                        Interrupt::FloorTransition { requires_branch_god_choice: true, .. }
                     ) {
-                        Choice::DescendBranchA
+                        Choice::DescendBranchAVeil
                     } else {
                         Choice::Descend
                     };
@@ -1738,19 +1814,20 @@ mod tests {
                 prompt_id,
                 current_floor,
                 next_floor,
-                requires_branch_choice,
+                requires_branch_god_choice,
             }) => {
                 assert_eq!(current_floor, 1);
                 assert_eq!(next_floor, Some(2));
-                assert!(requires_branch_choice, "first descent should require branch choice");
+                assert!(requires_branch_god_choice, "first descent should require branch choice");
                 prompt_id
             }
             other => panic!("expected floor transition interrupt, got {other:?}"),
         };
 
-        game.apply_choice(prompt_id, Choice::DescendBranchA).expect("descend should apply");
+        game.apply_choice(prompt_id, Choice::DescendBranchAVeil).expect("descend should apply");
         assert_eq!(game.state.floor_index, 2);
         assert_eq!(game.state.branch_profile, BranchProfile::BranchA);
+        assert_eq!(game.state.active_god, Some(GodId::Veil));
         assert_ne!(floor_one_tiles, game.state.map.tiles);
     }
 
@@ -1776,9 +1853,9 @@ mod tests {
                 ) => {
                     let choice = if matches!(
                         int,
-                        Interrupt::FloorTransition { requires_branch_choice: true, .. }
+                        Interrupt::FloorTransition { requires_branch_god_choice: true, .. }
                     ) {
-                        Choice::DescendBranchA
+                        Choice::DescendBranchAVeil
                     } else {
                         Choice::Descend
                     };
@@ -1817,7 +1894,7 @@ mod tests {
         };
 
         assert_eq!(first_prompt, second_prompt);
-        game.apply_choice(first_prompt, Choice::DescendBranchA).expect("descend should apply");
+        game.apply_choice(first_prompt, Choice::DescendBranchAVeil).expect("descend should apply");
         assert_eq!(game.state.floor_index, 2);
     }
 
@@ -1831,15 +1908,18 @@ mod tests {
         let first_prompt = match game.advance(1).stop_reason {
             AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
                 prompt_id,
-                requires_branch_choice,
+                requires_branch_god_choice,
                 ..
             }) => {
-                assert!(requires_branch_choice, "first descent should require branch choice");
+                assert!(
+                    requires_branch_god_choice,
+                    "first descent should require branch+god choice"
+                );
                 prompt_id
             }
             other => panic!("expected first floor-transition prompt, got {other:?}"),
         };
-        game.apply_choice(first_prompt, Choice::DescendBranchA).expect("select branch A");
+        game.apply_choice(first_prompt, Choice::DescendBranchAVeil).expect("select branch A");
 
         let mut stairs = None;
         for y in 0..game.state.map.internal_height {
@@ -1859,10 +1939,13 @@ mod tests {
 
         match game.advance(1).stop_reason {
             AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
-                requires_branch_choice,
+                requires_branch_god_choice,
                 ..
             }) => {
-                assert!(!requires_branch_choice, "branch choice should not reappear after commit");
+                assert!(
+                    !requires_branch_god_choice,
+                    "branch+god choice should not reappear after commitment"
+                );
             }
             other => panic!("expected second floor-transition prompt, got {other:?}"),
         }
@@ -1882,10 +1965,10 @@ mod tests {
         let prompt_a = match game_a.advance(1).stop_reason {
             AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
                 prompt_id,
-                requires_branch_choice,
+                requires_branch_god_choice,
                 ..
             }) => {
-                assert!(requires_branch_choice);
+                assert!(requires_branch_god_choice);
                 prompt_id
             }
             other => panic!("expected branch prompt in game A, got {other:?}"),
@@ -1893,17 +1976,17 @@ mod tests {
         let prompt_b = match game_b.advance(1).stop_reason {
             AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
                 prompt_id,
-                requires_branch_choice,
+                requires_branch_god_choice,
                 ..
             }) => {
-                assert!(requires_branch_choice);
+                assert!(requires_branch_god_choice);
                 prompt_id
             }
             other => panic!("expected branch prompt in game B, got {other:?}"),
         };
 
-        game_a.apply_choice(prompt_a, Choice::DescendBranchA).expect("choose branch A");
-        game_b.apply_choice(prompt_b, Choice::DescendBranchB).expect("choose branch B");
+        game_a.apply_choice(prompt_a, Choice::DescendBranchAVeil).expect("choose branch A");
+        game_b.apply_choice(prompt_b, Choice::DescendBranchBForge).expect("choose branch B");
 
         let floor_a_enemy_count =
             game_a.state.actors.iter().filter(|(id, _)| *id != game_a.state.player_id).count();
@@ -1920,6 +2003,182 @@ mod tests {
             floor_b_hazard_count > floor_a_hazard_count,
             "Branch B should create denser hazard floors"
         );
+    }
+
+    #[test]
+    fn first_descent_rejects_plain_descend_and_requires_combined_choice() {
+        let mut game = Game::new(112233, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.state.actors[game.state.player_id].pos = Pos { y: 11, x: 13 };
+
+        let prompt_id = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                requires_branch_god_choice,
+                ..
+            }) => {
+                assert!(requires_branch_god_choice);
+                prompt_id
+            }
+            other => panic!("expected floor transition interrupt, got {other:?}"),
+        };
+
+        let result = game.apply_choice(prompt_id, Choice::Descend);
+        assert!(matches!(result, Err(GameError::InvalidChoice)));
+
+        game.apply_choice(prompt_id, Choice::DescendBranchAForge)
+            .expect("combined branch+god choice should apply");
+        assert_eq!(game.state.branch_profile, BranchProfile::BranchA);
+        assert_eq!(game.state.active_god, Some(GodId::Forge));
+    }
+
+    #[test]
+    fn non_first_descent_rejects_combined_choice_and_accepts_descend() {
+        let mut game = Game::new(778899, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.state.actors[game.state.player_id].pos = Pos { y: 11, x: 13 };
+
+        let first_prompt = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition { prompt_id, .. }) => {
+                prompt_id
+            }
+            other => panic!("expected first floor transition interrupt, got {other:?}"),
+        };
+        game.apply_choice(first_prompt, Choice::DescendBranchBVeil)
+            .expect("first descent combined choice should apply");
+
+        let mut stairs = None;
+        for y in 0..game.state.map.internal_height {
+            for x in 0..game.state.map.internal_width {
+                let pos = Pos { y: y as i32, x: x as i32 };
+                if game.state.map.tile_at(pos) == TileKind::DownStairs {
+                    stairs = Some(pos);
+                    break;
+                }
+            }
+            if stairs.is_some() {
+                break;
+            }
+        }
+        game.state.actors[game.state.player_id].pos = stairs.expect("floor 2 stairs");
+
+        let prompt_id = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                requires_branch_god_choice,
+                ..
+            }) => {
+                assert!(!requires_branch_god_choice);
+                prompt_id
+            }
+            other => panic!("expected second floor transition interrupt, got {other:?}"),
+        };
+        let invalid = game.apply_choice(prompt_id, Choice::DescendBranchAForge);
+        assert!(matches!(invalid, Err(GameError::InvalidChoice)));
+        game.apply_choice(prompt_id, Choice::Descend).expect("plain descend should apply");
+    }
+
+    #[test]
+    fn veil_avoid_blinks_to_farthest_safe_tile() {
+        let mut game = Game::new(998877, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.state.active_god = Some(GodId::Veil);
+
+        let mut map = Map::new(9, 9);
+        for y in 1..8 {
+            for x in 1..8 {
+                map.set_tile(Pos { y, x }, TileKind::Floor);
+            }
+        }
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        map.set_hazard(Pos { y: 7, x: 7 }, true);
+        game.state.map = map;
+
+        let player_pos = Pos { y: 4, x: 4 };
+        game.state.actors[game.state.player_id].pos = player_pos;
+        let enemy_id = add_goblin(&mut game, Pos { y: 4, x: 5 });
+        game.state.actors[enemy_id].hp = 99;
+
+        let prompt_id = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { prompt_id, .. }) => {
+                prompt_id
+            }
+            other => panic!("expected enemy encounter interrupt, got {other:?}"),
+        };
+        game.apply_choice(prompt_id, Choice::Avoid).expect("avoid should apply");
+
+        assert_eq!(game.state.actors[game.state.player_id].pos, Pos { y: 1, x: 1 });
+    }
+
+    #[test]
+    fn veil_avoid_falls_back_to_suppression_when_no_safe_blink_exists() {
+        let mut game = Game::new(445566, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.state.active_god = Some(GodId::Veil);
+
+        let mut map = Map::new(7, 7);
+        for y in 1..6 {
+            for x in 1..6 {
+                map.set_tile(Pos { y, x }, TileKind::Wall);
+            }
+        }
+        let player_pos = Pos { y: 3, x: 3 };
+        let enemy_pos = Pos { y: 3, x: 4 };
+        map.set_tile(player_pos, TileKind::Floor);
+        map.set_tile(enemy_pos, TileKind::Floor);
+        map.discovered.fill(true);
+        map.visible.fill(true);
+        game.state.map = map;
+        game.state.actors[game.state.player_id].pos = player_pos;
+        let enemy_id = add_goblin(&mut game, enemy_pos);
+
+        let prompt_id = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::EnemyEncounter { prompt_id, .. }) => {
+                prompt_id
+            }
+            other => panic!("expected enemy encounter interrupt, got {other:?}"),
+        };
+        game.apply_choice(prompt_id, Choice::Avoid).expect("avoid should apply");
+
+        assert_eq!(game.state.actors[game.state.player_id].pos, player_pos);
+        assert_eq!(game.suppressed_enemy, Some(enemy_id));
+    }
+
+    #[test]
+    fn forge_choice_grants_hp_and_passive_defense() {
+        let mut game = Game::new(332211, &ContentPack::default(), GameMode::Ironman);
+        game.state.items.clear();
+        game.state.actors.retain(|id, _| id == game.state.player_id);
+        game.state.actors[game.state.player_id].pos = Pos { y: 11, x: 13 };
+        let start_max_hp = game.state.actors[game.state.player_id].max_hp;
+        let start_hp = game.state.actors[game.state.player_id].hp;
+
+        let prompt_id = match game.advance(1).stop_reason {
+            AdvanceStopReason::Interrupted(Interrupt::FloorTransition {
+                prompt_id,
+                requires_branch_god_choice,
+                ..
+            }) => {
+                assert!(requires_branch_god_choice);
+                prompt_id
+            }
+            other => panic!("expected first floor transition interrupt, got {other:?}"),
+        };
+        game.apply_choice(prompt_id, Choice::DescendBranchAForge)
+            .expect("forge choice should apply");
+
+        assert_eq!(game.state.active_god, Some(GodId::Forge));
+        assert_eq!(game.state.actors[game.state.player_id].max_hp, start_max_hp + 2);
+        assert_eq!(
+            game.state.actors[game.state.player_id].hp,
+            (start_hp + 2).min(start_max_hp + 2)
+        );
+        assert_eq!(game.effective_player_defense(), 2);
     }
 
     #[test]

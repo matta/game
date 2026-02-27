@@ -58,7 +58,13 @@ fn test_auto_explore_interrupt_choice_and_resume_loop() {
             Interrupt::LootFound { .. } => KeyCode::L,
             Interrupt::EnemyEncounter { .. } => KeyCode::F,
             Interrupt::DoorBlocked { .. } => KeyCode::O,
-            Interrupt::FloorTransition { .. } => KeyCode::C,
+            Interrupt::FloorTransition { requires_branch_god_choice, .. } => {
+                if *requires_branch_god_choice {
+                    KeyCode::Key1
+                } else {
+                    KeyCode::C
+                }
+            }
         };
         app.tick(&mut game, &[key]);
     }
@@ -96,11 +102,12 @@ fn test_app_branch_choice_navigation() {
     }
     assert!(reached_transition, "Did not reach floor transition");
 
-    // Select Branch B
-    app.tick(&mut game, &[KeyCode::B]);
+    // Select Branch B + Forge
+    app.tick(&mut game, &[KeyCode::Key4]);
 
     // Verify branch is committed in game state
     assert_eq!(game.state().branch_profile, core::BranchProfile::BranchB);
+    assert_eq!(game.state().active_god, Some(core::GodId::Forge));
     assert_eq!(game.state().floor_index, 2);
 }
 

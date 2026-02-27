@@ -43,11 +43,21 @@ fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Resul
                         (prompt_id, choose(&mut rng, &[Choice::KeepLoot, Choice::DiscardLoot]))
                     }
                     Interrupt::DoorBlocked { prompt_id, .. } => (prompt_id, Choice::OpenDoor),
-                    Interrupt::FloorTransition { prompt_id, requires_branch_choice, .. } => {
-                        if requires_branch_choice {
+                    Interrupt::FloorTransition {
+                        prompt_id, requires_branch_god_choice, ..
+                    } => {
+                        if requires_branch_god_choice {
                             (
                                 prompt_id,
-                                choose(&mut rng, &[Choice::DescendBranchA, Choice::DescendBranchB]),
+                                choose(
+                                    &mut rng,
+                                    &[
+                                        Choice::DescendBranchAVeil,
+                                        Choice::DescendBranchAForge,
+                                        Choice::DescendBranchBVeil,
+                                        Choice::DescendBranchBForge,
+                                    ],
+                                ),
                             )
                         } else {
                             (prompt_id, Choice::Descend)

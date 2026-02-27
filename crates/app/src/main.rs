@@ -42,6 +42,10 @@ async fn main() {
             KeyCode::F,
             KeyCode::A,
             KeyCode::B,
+            KeyCode::Key1,
+            KeyCode::Key2,
+            KeyCode::Key3,
+            KeyCode::Key4,
             KeyCode::O,
             KeyCode::C,
             KeyCode::M,
@@ -78,6 +82,7 @@ async fn main() {
         draw_text(&format!("Seed: {run_seed}"), 20.0, 330.0, 20.0, WHITE);
         draw_text(&format!("Floor: {} / 3", game.state().floor_index), 20.0, 310.0, 20.0, WHITE);
         draw_text(&format!("Branch: {:?}", game.state().branch_profile), 20.0, 290.0, 20.0, WHITE);
+        draw_text(&format!("God: {:?}", game.state().active_god), 20.0, 270.0, 20.0, WHITE);
 
         let intent_text = if let Some(intent) = game.state().auto_intent {
             format!(
@@ -244,9 +249,9 @@ fn prompt_text(interrupt: &Interrupt) -> String {
             format!("INTERRUPT: Enemy sighted (F=fight, A=avoid) Tags: {:?}", threat.danger_tags)
         }
         Interrupt::DoorBlocked { .. } => "INTERRUPT: Door blocked (O=open)".to_string(),
-        Interrupt::FloorTransition { next_floor, requires_branch_choice, .. } => {
-            if *requires_branch_choice {
-                "INTERRUPT: Stairs reached — choose branch (A=enemies, B=hazards)".to_string()
+        Interrupt::FloorTransition { next_floor, requires_branch_god_choice, .. } => {
+            if *requires_branch_god_choice {
+                "INTERRUPT: Choose pact (1=A+Veil, 2=A+Forge, 3=B+Veil, 4=B+Forge)".to_string()
             } else {
                 match next_floor {
                     Some(floor) => {

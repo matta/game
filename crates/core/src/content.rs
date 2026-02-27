@@ -28,6 +28,9 @@ pub mod keys {
     pub const PERK_SCOUT: &str = "perk_scout";
     pub const PERK_RECKLESS_STRIKE: &str = "perk_reckless_strike";
     pub const PERK_SHADOW_STEP: &str = "perk_shadow_step";
+
+    pub const GOD_VEIL: &str = "god_veil";
+    pub const GOD_FORGE: &str = "god_forge";
 }
 
 pub struct EnemyStats {
@@ -69,10 +72,17 @@ pub struct Perk {
     pub description: &'static str,
 }
 
+pub struct God {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+}
+
 pub struct ContentPack {
     pub weapons: Vec<Weapon>,
     pub consumables: Vec<Consumable>,
     pub perks: Vec<Perk>,
+    pub gods: Vec<God>,
 }
 
 impl ContentPack {
@@ -183,6 +193,18 @@ impl ContentPack {
                     id: keys::PERK_SHADOW_STEP,
                     name: "Shadow Step",
                     description: "Choosing 'Avoid' teleports you.",
+                },
+            ],
+            gods: vec![
+                God {
+                    id: keys::GOD_VEIL,
+                    name: "Veil",
+                    description: "Avoid blinks you to the farthest nearby safe tile.",
+                },
+                God {
+                    id: keys::GOD_FORGE,
+                    name: "Forge",
+                    description: "Gain +2 max HP, heal +2, and +2 passive defense.",
                 },
             ],
         }
