@@ -1,5 +1,6 @@
 use app::{
     app_loop::{AppCompletion, AppMode, AppState},
+    format_snapshot_hash,
     seed::{generate_runtime_seed, resolve_seed_from_args},
 };
 use core::{ContentPack, Game, GameMode, Interrupt, LogEvent, Pos, TileKind};
@@ -582,10 +583,6 @@ fn completion_reason_code(completion: AppCompletion) -> &'static str {
             "ENG_STALLED_NO_PROGRESS"
         }
     }
-}
-
-fn format_snapshot_hash(hash: u64) -> String {
-    format!("{hash:#018x}")
 }
 
 fn build_finished_recap_lines(
