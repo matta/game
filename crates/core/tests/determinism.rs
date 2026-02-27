@@ -32,6 +32,9 @@ fn build_scripted_journal(seed: u64, content: &ContentPack) -> InputJournal {
                     .expect("scripted choice should apply while building journal");
             }
             AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {}
+            AdvanceStopReason::EngineFailure(e) => {
+                panic!("Engine failure in determinism test: {:?}", e)
+            }
         }
     }
 }

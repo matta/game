@@ -1,6 +1,6 @@
 use game_core::{
-    AdvanceStopReason, Choice, ContentPack, DeathCause, Game, GameMode, Interrupt, RunOutcome,
-    TileKind,
+    AdvanceStopReason, Choice, ContentPack, DeathCause, EngineFailureReason, Game, GameMode,
+    Interrupt, RunOutcome, TileKind,
 };
 use proptest::prelude::*;
 use rand_chacha::{
@@ -27,7 +27,7 @@ fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Resul
             AdvanceStopReason::Finished(RunOutcome::Victory) => break,
             AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::Damage)) => break,
             AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::Poison)) => break,
-            AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::StalledNoProgress)) => {
+            AdvanceStopReason::EngineFailure(EngineFailureReason::StalledNoProgress) => {
                 return Err(format!(
                     "Invariant failed: StalledNoProgress on map_seed {}",
                     map_seed

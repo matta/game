@@ -1,5 +1,5 @@
 use crate::{
-    AdvanceStopReason, GameMode, RunOutcome,
+    AdvanceStopReason, EngineFailureReason, GameMode, RunOutcome,
     content::ContentPack,
     game::Game,
     journal::{InputJournal, InputPayload},
@@ -10,6 +10,7 @@ pub enum ReplayError {
     UnexpectedInterruption,
     MissingInput,
     SimulationStalled,
+    EngineFailure(EngineFailureReason),
 }
 
 #[derive(Debug, PartialEq)]
@@ -106,6 +107,9 @@ pub fn replay_to_end(
             }
             AdvanceStopReason::BudgetExhausted => {
                 // Just continue next loop iteration
+            }
+            AdvanceStopReason::EngineFailure(e) => {
+                return Err(ReplayError::EngineFailure(e));
             }
         }
     }

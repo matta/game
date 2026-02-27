@@ -351,11 +351,11 @@ impl Game {
             } else {
                 self.no_progress_ticks = self.no_progress_ticks.saturating_add(1);
                 if self.no_progress_ticks >= MAX_NO_PROGRESS_TICKS {
-                    let outcome = RunOutcome::Defeat(DeathCause::StalledNoProgress);
-                    self.finished_outcome = Some(outcome);
                     return AdvanceResult {
                         simulated_ticks: steps,
-                        stop_reason: AdvanceStopReason::Finished(outcome),
+                        stop_reason: AdvanceStopReason::EngineFailure(
+                            EngineFailureReason::StalledNoProgress,
+                        ),
                     };
                 }
             }
@@ -1714,6 +1714,7 @@ mod tests {
                 AdvanceStopReason::Finished(_) => break,
                 AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {
                 }
+                AdvanceStopReason::EngineFailure(e) => panic!("Engine failure in test: {:?}", e),
             }
         }
 
@@ -1786,6 +1787,7 @@ mod tests {
                 AdvanceStopReason::Finished(_) => break,
                 AdvanceStopReason::PausedAtBoundary { .. } | AdvanceStopReason::BudgetExhausted => {
                 }
+                AdvanceStopReason::EngineFailure(e) => panic!("Engine failure in test: {:?}", e),
             }
 
             assert!(game.state.floor_index >= last_floor, "floor index should never decrease");
@@ -1961,7 +1963,7 @@ mod tests {
         );
         assert!(matches!(
             result.stop_reason,
-            AdvanceStopReason::Finished(RunOutcome::Defeat(DeathCause::StalledNoProgress))
+            AdvanceStopReason::EngineFailure(crate::EngineFailureReason::StalledNoProgress)
         ));
     }
 
@@ -2977,5 +2979,4 @@ mod tests {
         assert_eq!(left, right, "magnetic lure results should not depend on insertion order");
         assert_eq!(left, vec![Pos { y: 4, x: 5 }, Pos { y: 4, x: 6 }]);
     }
-
 }

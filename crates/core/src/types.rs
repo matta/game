@@ -62,11 +62,10 @@ pub enum DeathCause {
     Damage,
     /// Player died because poison damage reduced HP to zero.
     Poison,
-    /// Guardrail defeat used to stop an unintended no-progress loop.
-    ///
-    /// This should not happen in normal gameplay. If it appears, treat it as
-    /// a bug in map generation or decision logic that left no valid path
-    /// forward.
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineFailureReason {
     StalledNoProgress,
 }
 
@@ -121,6 +120,7 @@ pub enum AdvanceStopReason {
     PausedAtBoundary { tick: u64 },
     Finished(RunOutcome),
     BudgetExhausted,
+    EngineFailure(EngineFailureReason),
 }
 
 #[derive(Clone, Debug)]

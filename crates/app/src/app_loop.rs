@@ -203,6 +203,9 @@ impl AppState {
                 AdvanceStopReason::BudgetExhausted => {
                     // Continuing auto play on next frame
                 }
+                AdvanceStopReason::EngineFailure(e) => {
+                    panic!("Engine bug detected: {:?}", e);
+                }
             }
         }
     }
