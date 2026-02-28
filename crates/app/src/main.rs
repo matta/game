@@ -170,7 +170,8 @@ async fn main() {
     }
 
     let content = ContentPack::default();
-    let mut game = Game::new(run_seed, &content, GameMode::Ironman);
+    let mut current_run_seed = run_seed;
+    let mut game = Game::new(current_run_seed, &content, GameMode::Ironman);
 
     if let Some(path) = &diagnostics_path {
         game.push_log(LogEvent::Notice(format!("Logs: {}", path.display())));
@@ -228,7 +229,8 @@ async fn main() {
             && is_key_pressed(KeyCode::K)
         {
             if let Some(seed) = recovered_seed {
-                game = Game::new(seed, &content, GameMode::Ironman);
+                current_run_seed = seed;
+                game = Game::new(current_run_seed, &content, GameMode::Ironman);
                 app_state = AppState::default();
                 game.push_log(LogEvent::Notice(format!("RESTARTED WITH SEED: {}", seed)));
             }
@@ -355,7 +357,7 @@ async fn main() {
         let mut stats_y = pos_stats.1 + pad_y;
         let p_x = pos_stats.0 + pad_x;
         if let AppMode::Finished(completion) = &app_state.mode {
-            let recap_lines = build_finished_recap_lines(&game, run_seed, completion.clone());
+            let recap_lines = build_finished_recap_lines(&game, current_run_seed, completion.clone());
             for line in recap_lines {
                 draw_text(&line, p_x, stats_y, 20.0, WHITE);
                 stats_y += 20.0;
@@ -363,7 +365,7 @@ async fn main() {
         } else {
             draw_text(&format!("Tick: {}", game.current_tick()), p_x, stats_y, 20.0, WHITE);
             stats_y += 20.0;
-            draw_text(&format!("Seed: {run_seed}"), p_x, stats_y, 20.0, WHITE);
+            draw_text(&format!("Seed: {current_run_seed}"), p_x, stats_y, 20.0, WHITE);
             stats_y += 20.0;
             draw_text(
                 &format!("Floor: {} / 5", game.state().floor_index),
