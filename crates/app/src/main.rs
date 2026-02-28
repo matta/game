@@ -357,7 +357,8 @@ async fn main() {
         let mut stats_y = pos_stats.1 + pad_y;
         let p_x = pos_stats.0 + pad_x;
         if let AppMode::Finished(completion) = &app_state.mode {
-            let recap_lines = build_finished_recap_lines(&game, current_run_seed, completion.clone());
+            let recap_lines =
+                build_finished_recap_lines(&game, current_run_seed, completion.clone());
             for line in recap_lines {
                 draw_text(&line, p_x, stats_y, 20.0, WHITE);
                 stats_y += 20.0;

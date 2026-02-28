@@ -94,11 +94,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         Commands::CheckClippySuppressions { all } => check_clippy_suppressions(all),
-        Commands::CheckRustTokenCount {
-            all,
-            limit,
-            print_counts,
-        } => check_rust_token_count(all, limit, print_counts),
+        Commands::CheckRustTokenCount { all, limit, print_counts } => {
+            check_rust_token_count(all, limit, print_counts)
+        }
     }
 }
 
@@ -114,9 +112,8 @@ fn get_files_to_check(root: &Path, all: bool) -> Result<HashSet<String>> {
 
     if !all {
         // Get both staged and unstaged changes
-        let mut changed: HashSet<String> = get_git_files(root, &["diff", "--name-only", "HEAD"])?
-            .into_iter()
-            .collect();
+        let mut changed: HashSet<String> =
+            get_git_files(root, &["diff", "--name-only", "HEAD"])?.into_iter().collect();
         // Also get untracked files
         changed.extend(untracked);
 
@@ -319,11 +316,7 @@ fn find_denied_clippy_suppressions(
             }
 
             let byte_index = args.start() + lint_match.start();
-            let line = source[..byte_index]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count()
-                + 1;
+            let line = source[..byte_index].bytes().filter(|byte| *byte == b'\n').count() + 1;
             hits.push(ClippySuppressionHit {
                 kind: kind.to_string(),
                 lint: lint.to_string(),
