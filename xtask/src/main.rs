@@ -16,7 +16,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// Default maximum number of non-comment, non-whitespace tokens allowed per Rust file.
-const DEFAULT_TOKEN_LIMIT: usize = 2547;
+const DEFAULT_TOKEN_LIMIT: usize = 2500;
 /// Exact clippy lints that repository policy forbids suppressing with `allow`/`expect`.
 ///
 /// We intentionally do **not** enforce this via `cargo clippy ... -F clippy::<lint>` in
@@ -372,13 +372,12 @@ fn get_git_files(root: &Path, args: &[&str]) -> Result<Vec<String>> {
 }
 
 #[cfg(test)]
-#[expect(clippy::expect_used, reason = "TODO: remove all calls to expect")]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_count_tokens() {
-        let temp = tempfile::tempdir().expect("Failed to create temp dir");
+    fn test_count_tokens() -> AnyhowResult<()> {
+        let temp = tempfile::tempdir()?;
         let path = temp.path().join("test.rs");
 
         let code = r##"
@@ -388,9 +387,9 @@ mod tests {
                 let s = "This is a string // with a comment inside";
             }
         "##;
-        fs::write(&path, code).expect("Failed to write test file");
+        fs::write(&path, code)?;
 
-        let count = count_tokens(&path).expect("Should count tokens");
+        let count = count_tokens(&path)?;
         // Tokens:
         // 1: fn
         // 2: main
@@ -409,6 +408,7 @@ mod tests {
         // 15: ;
         // 16: }
         assert_eq!(count, 16);
+        Ok(())
     }
 
     #[test]
