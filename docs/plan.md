@@ -22,12 +22,12 @@ A deterministic, ASCII-grid roguelike with:
 - Procedural dungeon floors + small authored vault templates
 - Branching dungeon structure (strict one-way descent)
 - Ironman primary mode
-- Optional checkpoint-based easy mode (time travel via full replay from tick 0)
 - Journal-based save/load (same-build compatibility only)
 - Fully deterministic seed-based runs
 
 Deferred post-MVP:
-- Snapshot-accelerated reloads (fast checkpoint restore without full replay)
+- Snapshot-accelerated replay bootstrap (faster reload without full replay)
+- Optional checkpoint/time-travel mode, if we later decide to add it
 - Best-effort replay migration across code/content versions
 
 ---
@@ -135,7 +135,6 @@ To minimize complexity and enforce determinism, the MVP uses **exactly one** sta
 
 - **Saving (ironman):** Write `{seed, inputs_so_far}` to disk.
 - **Loading:** Instantiate from `seed`, replay all inputs to reconstruct state.
-- **Easy Mode:** Load the same file, truncate inputs to a checkpoint marker, and replay from tick 0.
 - **Debugging:** Export the same file to reproduce bugs perfectly.
 
 ```rust
@@ -145,37 +144,28 @@ pub struct InputJournal {
   pub content_hash: u64,     // content pack fingerprint
   pub seed: u64,
   pub inputs: Vec<InputRecord>,
-  pub checkpoints: Vec<CheckpointMarker>, // easy-mode restore candidates
 }
 
 pub struct InputRecord {
   pub seq: u64,
+  pub tick_boundary: u64,
   pub payload: InputPayload,
+  pub prev_sha256_hex: String,
+  pub sha256_hex: String,
 }
 
 pub enum InputPayload {
   Choice { prompt_id: ChoicePromptId, choice: Choice },
-  PolicyUpdate(PolicyUpdate), // takes effect on the next simulation tick
-}
-
-pub struct CheckpointMarker {
-  pub id: u32,
-  pub input_seq: u64,      // restore by truncating inputs beyond this sequence
-  pub reason: CheckpointReason,
-}
-
-pub enum CheckpointReason {
-  GodChoiceResolved,
-  BranchCommitted,
-  CampResolved,
-  PerkChosen,
-  BuildDefiningLootResolved,
+  PolicyUpdate(PolicyUpdate),
+  SwapActiveWeapon,
 }
 ```
 
 MVP Disk I/O Semantics:
-- The journal is held in memory and written to disk only when an `InputRecord` is appended (i.e., upon resolving an interrupt or updating a policy).
-- Writing uses a simple write-to-temp-file and atomic-rename to prevent corruption. No continuous per-tick disk syncing.
+- Journal persistence is append-only `.jsonl`: one header line, then one record per accepted simulation input.
+- Each appended record stores a SHA-256 chain (`prev_sha256_hex`, `sha256_hex`) for corruption detection.
+- Appends are flushed immediately after every accepted input (`Choice`, `PolicyUpdate`, `SwapActiveWeapon`).
+- Replay loader validates JSON shape and SHA-256 chain per line and stops on the first invalid/incomplete line with an "incomplete replay" error.
 - `ChoicePromptId` is emitted by `core` with each `Interrupt`, and must match on `apply_choice(...)`.
 - MVP compatibility guarantee: journal replay is supported only when `build_id` and `content_hash` match.
 
@@ -242,14 +232,12 @@ pub fn replay_to_end(
 - Replay applies policy updates at the recorded boundary before simulating the next tick.
 - Interrupts/finish are surfaced as stop reasons; app shows related UI immediately.
 
-## 3.4 Easy Mode Checkpoint Model
+## 3.4 MVP Recovery Scope
 
-- Easy mode uses engine-authored checkpoint markers at deterministic boundaries (e.g., resolved god choice, branch commitment, resolved camp), omitting per-level checkpoints to preserve tension.
-- Build-identity checkpoints are also supported (`PerkChosen`, `BuildDefiningLootResolved`).
-- On death, player may select any unlocked checkpoint.
-- **Restore mechanic:** Load the `InputJournal`, truncate the `inputs` list to the checkpoint marker's `input_seq`, and replay deterministically from tick 0.
-- Because replay involves only discrete `InputRecord` evaluation, simulation-from-zero performs fast enough for an MVP without the complexity of building a separate `GameState` snapshot/serde system.
-- To avoid checkpoint spam, build-defining loot checkpoints should be gated by explicit content flags/rarity tiers rather than firing for every pickup/equip.
+- MVP has no easy mode and no checkpoint rollback flow.
+- Recovery/debug flow is replay from tick 0 using the append-only input journal up to the last valid record.
+- If a journal is corrupted or truncated, replay stops at the first invalid line and reports an incomplete replay.
+- Any checkpoint/time-travel mode is explicitly deferred to post-MVP.
 
 ---
 
@@ -333,7 +321,6 @@ Interrupt types (MVP subset):
 - CampChoice
 - PerkChoice
 - BossEncounter
-- CheckpointAvailable (easy mode only)
 
 Enemy encounter fairness contract (MVP):
 
@@ -699,7 +686,7 @@ Execution guardrails for all Milestone 4 passes:
 - [x] `Branch A`: increases enemy density on floors 2–5 (`+1` enemy group spawn attempt per floor).
 - [x] `Branch B`: increases hazard density on floors 2–5 (`+3` hazard tiles per floor, deterministic placement rules).
 - [x] Persist branch commitment in run state and thread it into deterministic floor generation for all subsequent floors.
-- [ ] Issue a checkpoint marker on Branch Commitment, but omit per-level checkpoints to preserve tension and mitigate the Emotional Dilution risk. Deferred to Milestone 6 journal/checkpoint implementation.
+- [x] Do not emit checkpoint markers for branch commitment in MVP (easy mode/checkpoint flow is out of scope).
 - [x] Ensure branch prompt is emitted exactly once per run and never re-offered after commitment.
 - [x] Add unit test: same seed + same branch => identical floor 2/3 generation.
 - [x] Add unit test: same seed + different branch => measurable deterministic difference in floor 2/3 spawn/hazard outputs.
@@ -951,15 +938,38 @@ Milestone 6 task completion checklist:
 - **b) Progress toward vision:** "Lethal-but-fair gameplay" and "No opaque randomness" (Vision 1.4, 8.5) physically realized.
 - **c) Architecture & Maintainability:** Deepens determinism tooling. Ensures the game is fundamentally debuggable using player-submitted crash seeds as reliable regression tests.
 
-## Milestone 7 — Persistence, Replay, and Easy Mode Checkpoints (8–10 hrs)
-- [ ] Implement append-only `InputJournal` logging in memory, writing atomically on new inputs.
-- [ ] Load games by replaying journal events from tick 0.
-- [ ] Add deterministic checkpoint marker generation at engine-authored boundaries.
-- [ ] Implement death flow to select checkpoint and restore via truncating journal and replaying from tick 0.
+## Milestone 7 — Durable Journal and Crash Replay (6–8 hrs)
+
+**Design Goals & Risk Mitigation:**
+- **Primary goal: always reproduce crashes (Vision 6.4):** Persist accepted simulation inputs as the run is played so a crash can be replayed to the last valid record.
+- **Corruption detection:** Use line-delimited JSON (`.jsonl`) with a SHA-256 hash chain per record to detect corruption or accidental truncation immediately.
+- **Scope control (Risk 4.1):** Keep this milestone focused on crash recovery/debugging. Defer watch-mode UI and all easy-mode rollback features to post-MVP.
+- **MVP mode decision:** There is no easy mode in MVP.
+
+Execution guardrails for all Milestone 7 passes:
+- [ ] Execute passes strictly in order.
+- [ ] Use TDD in every pass.
+- [ ] Run all check/clippy/test commands with 0 failures after each pass.
+
+### Milestone 7a — Dribbling JSONL Journal + SHA-256 Chain (3–4 hrs)
+- [ ] Implement a file-backed `InputJournal` using `.jsonl`.
+- [ ] Write a header line first: `format_version`, `seed`, `build_id`, `content_hash`.
+- [ ] Append one record per accepted simulation input (`Choice`, `PolicyUpdate`, `SwapActiveWeapon`) with: `seq`, `tick_boundary`, `payload`, `prev_sha256`, `sha256`.
+- [ ] Hash rule: each `sha256` is computed over a canonical serialized record body plus `prev_sha256` so record order/deletion/corruption is detected.
+- [ ] Flush append data immediately after each accepted input mutation.
+- [ ] Add unit tests for schema round-trip, hash-chain verification, and truncated-line handling.
+
+### Milestone 7b — Crash Replay from Journal (3–4 hrs)
+- [ ] Implement headless `load_from_journal` that initializes from header seed and replays records in order.
+- [ ] Verify each line during load/replay (`valid JSON` + `valid SHA-256 chain`).
+- [ ] On first invalid JSON line, incomplete line, or checksum mismatch: stop replay immediately and return an "incomplete replay" error with line index and reason.
+- [ ] Add tests showing valid journal replay equivalence (`same final snapshot_hash`) and corrupted journal fail-fast behavior (`replay stops at first bad line`).
+- [ ] Show a clear user-facing warning/error when replay is incomplete.
+
 **Exit Criteria:**
-- **a) User Experience:** Player can safely close the game and perfectly resume their run. If playing "easy mode," deaths gracefully bounce the player back to a natural progression checkpoint to try a different policy.
-- **b) Progress toward vision:** Finalizes the targeted Saving Model (Ironman vs Checkpoint) (Vision 6.3).
-- **c) Architecture & Maintainability:** Proves the append-only `InputJournal` replay loop in practice. Fast-forwarding simulation entirely removes the maintenance burden of generic state serialization (serde) snapshots.
+- **a) User Experience:** If the game crashes, the run can be replayed deterministically to the last valid journaled input, with clear messaging when a journal is incomplete or corrupted.
+- **b) Progress toward vision:** Reinforces deterministic, reproducible runs without adding micromanagement UI or easy-mode rollback scope.
+- **c) Architecture & Maintainability:** Journal files become a robust, append-only debugging artifact with explicit integrity checks, while keeping MVP scope tight.
 
 # 9. Deployment Plan
 
@@ -997,7 +1007,7 @@ Goal: maximize bug-catching per engineering hour, given a ~120 hour budget.
 Rationale:
 - Golden replay files are expensive during rapid content iteration because expected outputs churn frequently.
 - Small, focused property tests catch broad logic bugs without coupling tests to unstable content details.
-- Determinism smoke tests and replay round-trip tests (including checkpoint restore equivalence) provide core confidence with low maintenance.
+- Determinism smoke tests and replay round-trip tests provide core confidence with low maintenance.
 - The replay executor is API-first (better for CI and library-level tests); CLI remains a convenience layer, not the core contract.
 - Add batching-equivalence tests (`N` single-tick advances vs one `advance(N, ..)`) to protect performance optimizations without risking behavior drift.
 
@@ -1005,7 +1015,8 @@ Rationale:
 
 # 12. Post-MVP Backlog
 
-- Snapshot-accelerated checkpoint restore for faster reloads.
+- Snapshot-accelerated replay bootstrap for faster reloads.
+- Optional checkpoint/time-travel mode if future playtesting justifies it.
 - Best-effort migration layer for replay files across content/code versions.
 - Optional golden replay corpus once content format stabilizes.
 
@@ -1034,9 +1045,9 @@ Rationale:
 **Rationale:** Relying on creation sequence for simulation logic makes replays extremely fragile; a cosmetic tweak that creates an invisible particle effect or drops an item out-of-order would permanently break the run seed determinism.
 
 ## DR-005: Replay-Only State Restoration over Snapshots
-**Context:** Needed a state restoration system for save/load, easy-mode time travel, and debugging. Considered implementing serde snapshots to avoid the presumed performance cost of replaying from tick 0.
-**Decision:** Rejected snapshots. The MVP will use exactly one restoration mechanism: a lightweight Input Journal (`seed` + player choices/policies). Time travel is achieved by truncating the journal and re-simulating from tick 0.
-**Rationale:** Having exactly one restoration mechanism drastically reduces complexity. The performance cost of re-simulating an ASCII run without rendering is presumed fast enough for an MVP, making the optimization of snapshots premature. Crucially, a journal provides a perfect test harness for our strict determinism contract and trivial, shareable debug replays.
+**Context:** Needed a state restoration system for save/load and crash debugging. Considered implementing serde snapshots to avoid the presumed performance cost of replaying from tick 0.
+**Decision:** Rejected snapshots. The MVP uses exactly one restoration mechanism: a lightweight Input Journal (`seed` + player choices/policies) replayed from tick 0.
+**Rationale:** One restoration mechanism drastically reduces complexity. Re-simulating an ASCII run without rendering is fast enough for MVP, so snapshot optimization is premature. The journal also doubles as a deterministic, shareable crash-repro artifact.
 
 ## DR-006: Direct State Access over DTO Mapping
 **Context:** Needed to prevent presentation logic (glyphs, colors) from bleeding into the `core` simulation engine. Initial plan used `ObservationRef` DTOs to encapsulate `core` state before passing it to `app`.

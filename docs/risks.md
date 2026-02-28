@@ -40,5 +40,5 @@ The plan heavily prioritizes determinism and engine-level testing, but lacks syn
 ### Engine Architecture Eclipsing Buildcrafting
 A massive percentage of the development roadmap is dedicated exclusively to perfect mathematical determinism, input journaling, tie-breaking logic, generating stable snapshot hashes, and headless test harnesses. With a strict 120-hour budget, the plan heavily indexes on "Architecture Astronautics" regarding determinism. This risks exhausting the time budget on a perfectly deterministic headless replay engine while starving the time needed to design the 15 items, 10 perks, and robust synergies that make the game fun.
 
-### The "Checkpoint Emotional Dilution" Risk
-The "Easy Mode" uses checkpoints with time travel to soften the game's difficulty. However, if checkpoints trigger too frequently (at every perk, every loot spike, or every branch), the game risks trivializing death tension. The vision’s failure philosophy depends heavily on near-death tension and earned consequences. To preserve the emotional stakes, the checkpoint cadence must be sparse and deeply meaningful.
+### Deferred: "Checkpoint Emotional Dilution" Risk
+Checkpoint/time-travel rollback has been removed from MVP scope. This risk is deferred unless that mode returns post-MVP. If reintroduced, checkpoints must stay sparse and meaningful to preserve death tension.

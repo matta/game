@@ -157,9 +157,10 @@ Future potential: auto-salvage rules layered on top.
 - No audio
 
 ## 6.3 Saving Model
-- Ironman primary mode
-- Checkpoint-based “easy mode” optional
-- Checkpoints potentially tied to key decision points (future time-travel hook)
+- Ironman-only in MVP
+- Append-only input journal persists accepted inputs during play
+- Replay from journal is the only MVP recovery path
+- Optional checkpoint/time-travel mode is deferred post-MVP
 
 ## 6.4 Determinism
 Required:
