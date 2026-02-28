@@ -2,7 +2,6 @@
 members = [
     "crates/core",
     "crates/app",
-    "crates/tools",
     "xtask",
 ]
 resolver = "2"

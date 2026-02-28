@@ -1,8 +1,11 @@
-use game_core::{
+use core::{
     AdvanceStopReason, Choice, ContentPack, DeathCause, EngineFailureReason, Game, GameMode,
     Interrupt, RunOutcome, TileKind,
 };
-use proptest::prelude::*;
+use proptest::{
+    arbitrary::any,
+    test_runner::{Config as ProptestConfig, TestCaseError, TestRunner},
+};
 use rand_chacha::{
     ChaCha8Rng,
     rand_core::{Rng, SeedableRng},
@@ -88,12 +91,15 @@ fn run_fuzz_simulation(map_seed: u64, choice_seed: u64, max_ticks: u32) -> Resul
     Ok(())
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(20))]
-    #[test]
-    fn test_fuzz_game_simulation(map_seed in any::<u64>(), choice_seed in any::<u64>()) {
-        if let Err(msg) = run_fuzz_simulation(map_seed, choice_seed, 2000) {
-            prop_assert!(false, "{}", msg);
-        }
-    }
+#[test]
+fn test_fuzz_game_simulation() {
+    let mut runner = TestRunner::new(ProptestConfig::with_cases(20));
+    let seeds = (any::<u64>(), any::<u64>());
+
+    runner
+        .run(&seeds, |(map_seed, choice_seed)| {
+            run_fuzz_simulation(map_seed, choice_seed, 2000).map_err(TestCaseError::fail)?;
+            Ok(())
+        })
+        .expect("semantic fuzz simulation should preserve invariants");
 }

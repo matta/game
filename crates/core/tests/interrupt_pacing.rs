@@ -1,4 +1,4 @@
-use game_core::{
+use core::{
     AdvanceStopReason, Choice, ContentPack, EngineFailureReason, Game, GameMode, Interrupt,
 };
 

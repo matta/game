@@ -34,15 +34,16 @@ Deferred post-MVP:
 
 # 2. Workspace Architecture
 
-Cargo workspace layout utilizes three distinct crates to enforce strict separation of concerns and protect the deterministic core simulation:
+Cargo workspace layout utilizes two distinct crates to enforce strict separation of concerns and protect the deterministic core simulation:
 
 ```text
 /Cargo.toml
 crates/
   core/      # Deterministic simulation engine + Hardcoded Content
   app/       # Macroquad frontend (UI shell and input translation)
-  tools/     # Optional balance/replay tools
 ```
+
+Headless validation (determinism, pacing checks, and fuzzing) lives in `core` tests and CI targets.
 
 ## 2.1 Memory Management Strategy
 The `core` crate uses Generational Arenas (`slotmap`) for **actor** storage (player + monsters) and **item instance** storage (stable `ItemId`). This avoids borrow checker conflicts and prevents use-after-free errors when entities are created and destroyed during simulation, without resorting to complex ECS frameworks.
@@ -208,7 +209,7 @@ MVP policy timing split:
 - Loadout-affecting updates (equip/swap) are issued manually during an interrupt pause and consume time via `SwapActiveWeapon` action(s).
 - Policy knob edits (priority/stance/thresholds) are applied at pause boundaries without direct tick cost.
 
-This contract enables a headless `tools/replay_runner` that exercises `core` without any rendering dependency.
+This contract enables headless replay verification through `core::replay_to_end` in tests and CI without any rendering dependency.
 
 Replay execution surface (MVP):
 
@@ -226,8 +227,7 @@ pub fn replay_to_end(
 ```
 
 - Primary contract is the Rust API in `core` (`replay_to_end`) used by tests/CI.
-- `tools/replay_runner` is a thin CLI wrapper around that API for manual verification and debugging.
-- CLI minimum behavior: load journal, run replay headlessly, print final `snapshot_hash` and outcome.
+- Replay verification is done through `core` integration tests and targeted regression tests; no standalone replay CLI is required.
 
 ## 3.3 Pause/Policy Timing Model
 
@@ -469,21 +469,20 @@ async fn main() {
 # 8. Milestone Roadmap
 
 ## Milestone 0 — Workspace Setup (3–5 hrs)
-- [x] Create 3-crate workspace (`core`, `app`, `tools`).
+- [x] Create workspace with simulation crate (`core`) and frontend crate (`app`); keep headless validation in `core` tests.
 - [x] Add rustfmt + clippy.
 - [x] Basic CI (test + lint).
 - [x] README.
 **Exit Criteria:**
 - **a) User Experience:** None. This is pure developer scaffolding.
 - **b) Progress toward vision:** Sets up the open-source baseline (Vision 6.5).
-- **c) Architecture & Maintainability:** Establishes the 3-crate layout protecting the deterministic layer (`core`). CI/CD pipelines, cargo formatting, and basic linting are in place, confirming a sustainable development environment.
+- **c) Architecture & Maintainability:** Establishes a clean workspace layout protecting the deterministic layer (`core`). CI/CD pipelines, cargo formatting, and basic linting are in place, confirming a sustainable development environment.
 
 ## Milestone 1 — CoreSim Skeleton & Initial UI (10–12 hrs)
 - [x] Set up `slotmap` for actors + item instances in `core`, and `ChaCha8Rng`.
 - [x] Implement `RunState` and basic map structure (dense tile arrays).
 - [x] Implement `advance(...)` API (`AdvanceResult`, stop reasons) and prompt-bound `apply_choice`.
 - [x] Implement headless replay API in `core` (`replay_to_end(content, journal) -> ReplayResult`).
-- [x] Add thin `tools/replay_runner` CLI wrapper that prints final `snapshot_hash`/outcome from a journal file.
 - [x] Build the minimal Macroquad `app` shell to render a simple grid, proving the core/app communication contract.
 - [x] Implement single-clock auto loop (synchronous batch stepping) with pause-at-next-tick-boundary behavior.
 - [x] Implement Player + 1 enemy, turn engine, and fake loot interrupt.
@@ -741,10 +740,10 @@ Execution guardrails for all Milestone 4 passes:
 - **c) Architecture & Maintainability:** Floor generation and transition logic are deterministic, bounded, and covered by unit + integration regressions.
 
 ### Milestone 4f — Minimal Headless Fuzzer + CI Integration (1–2 hrs)
-- [x] Create `crates/tools/src/bin/fuzz.rs` to instantiate headless simulation loops.
+- [x] Add semantic fuzz integration test coverage under `crates/core/tests` to instantiate headless simulation loops.
 - [x] Implement semantic fuzzing oracle: picks random valid choices upon encountering interrupts (Loot, Enemies, Doors, Floor Transitions).
-- [x] Add inline invariant assertions on `&GameState` (e.g. valid HP paths, actor bounds, valid tiles) inside the fuzz loop.
-- [x] Add CI step in `.github/workflows/ci.yml` to run the fuzzer for 1,000 steps on every push.
+- [x] Add inline invariant assertions on `&GameState` (e.g. valid HP paths, actor bounds, valid tiles) inside the fuzz test harness in `core` tests.
+- [x] Add CI step in `.github/workflows/ci.yml` to run the `core` fuzz target for 1,000 steps on every push.
 **Pass 4f Exit Criteria:**
 - **a) User Experience:** None directly.
 - **b) Progress toward vision:** Mechanically guarantees Vision 6.4 (Determinism + Fairness Validation) by fuzzing semantic paths to catch edge bugs, dead states, and panic conditions immediately.

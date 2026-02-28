@@ -34,4 +34,4 @@ jobs:
       run: PROPTEST_CASES=2500 cargo test -p core generated_floors_keep_walkable_tiles_connected --release
 
     - name: Run headless fuzzer
-      run: PROPTEST_CASES=2500 cargo test -p tools --test fuzz_tests --release
+      run: PROPTEST_CASES=2500 cargo test -p core --test semantic_fuzz --release
