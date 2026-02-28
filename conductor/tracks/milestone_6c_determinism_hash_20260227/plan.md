@@ -1,9 +1,9 @@
 # Implementation Plan: Milestone 6c — Determinism Hash Surfacing + Crash-Recovery State File
 
-## Phase 1: Standardize Snapshot Hash HUD Surfacing
+## Phase 1: Standardize Snapshot Hash HUD Surfacing [checkpoint: 7a67f4d]
 - [x] Task: Update `format_snapshot_hash` in `crates/app/src/main.rs` to ensure exact `0x` + 16 lowercase hex digits format (using `018x`). (71aeac8)
-- [~] Task: Verify the HUD stats panel correctly displays the hash on every tick.
-- [ ] Task: Conductor - User Manual Verification 'Standardize Snapshot Hash HUD Surfacing' (Protocol in workflow.md)
+- [x] Task: Verify the HUD stats panel correctly displays the hash on every tick. (851c094)
+- [x] Task: Conductor - User Manual Verification 'Standardize Snapshot Hash HUD Surfacing' (Protocol in workflow.md) (7a67f4d)
 
 ## Phase 2: RunState Diagnostics Module
 - [ ] Task: Add `serde`, `serde_json`, and `directories` dependencies to `crates/app/Cargo.toml`.
