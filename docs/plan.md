@@ -961,18 +961,6 @@ Milestone 6 task completion checklist:
 - **b) Progress toward vision:** Finalizes the targeted Saving Model (Ironman vs Checkpoint) (Vision 6.3).
 - **c) Architecture & Maintainability:** Proves the append-only `InputJournal` replay loop in practice. Fast-forwarding simulation entirely removes the maintenance burden of generic state serialization (serde) snapshots.
 
-## Milestone 8 — Release Packaging (8–10 hrs)
-- [ ] Versioning and final balance pass.
-- [ ] macOS + Linux builds.
-- [ ] Run summary screen.
-- [ ] GitHub release or Itch upload.
-**Exit Criteria:**
-- **a) User Experience:** A cohesive, polished client. Clean fonts, finalized colors, smooth input polling, and an intuitive run-summary screen. Completely playable as a standalone desktop app.
-- **b) Progress toward vision:** Finalizes the Desktop target (Vision 6.1). Achieves the fully integrated MVP session length.
-- **c) Architecture & Maintainability:** CI pipelines successfully yield distributable binaries. Final profiling guarantees UI responsiveness never stutters during synchronous auto-explore batches.
-
----
-
 # 9. Deployment Plan
 
 None.
