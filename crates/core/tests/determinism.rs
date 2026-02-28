@@ -58,6 +58,28 @@ fn test_determinism_identical_seeds_produce_same_hash() {
 }
 
 #[test]
+fn test_determinism_with_policy_updates() {
+    use core::types::{FightMode, PolicyUpdate};
+    let content = ContentPack::default();
+    let seed = 12345;
+
+    let mut game1 = Game::new(seed, &content, GameMode::Ironman);
+    game1.apply_policy_update(PolicyUpdate::FightMode(FightMode::Avoid)).unwrap();
+    game1.advance(10);
+
+    let mut game2 = Game::new(seed, &content, GameMode::Ironman);
+    game2.apply_policy_update(PolicyUpdate::FightMode(FightMode::Avoid)).unwrap();
+    game2.advance(10);
+
+    assert_eq!(
+        game1.snapshot_hash(),
+        game2.snapshot_hash(),
+        "Identical policy updates must produce identical hashes"
+    );
+    assert_eq!(game1.current_tick(), game2.current_tick());
+}
+
+#[test]
 fn test_determinism_different_seeds_produce_different_hashes() {
     let content = ContentPack::default();
     let journal1 = build_scripted_journal(123, &content);
