@@ -848,32 +848,32 @@ Execution guardrails for all Milestone 6 passes:
 - **c) Architecture & Maintainability:** Seed formatting behavior is isolated and test-covered.
 
 ### Milestone 6c — Determinism Hash Surfacing + Crash-Recovery State File (2 hrs)
-- [ ] In `crates/app/src/main.rs`, render `snapshot_hash` in HUD in fixed hex format (16 hex digits).
-- [ ] Hash text format is exact `0x` + 16 lowercase hex digits.
-- [ ] Add run diagnostics state module in `crates/app/src/run_state_file.rs`.
-- [ ] Persist diagnostics to a JSON file at relative path `./.game_state/last_run_state.json`.
-- [ ] Define exact JSON schema (versioned, no optional required fields):
-  - [ ] `format_version: 1`
-  - [ ] `run_seed: u64`
-  - [ ] `snapshot_hash_hex: String` (exactly `0x` + 16 lowercase hex digits)
-  - [ ] `tick: u64`
-  - [ ] `floor_index: u8`
-  - [ ] `branch_profile: String`
-  - [ ] `active_god: String` (use `"none"` when no god selected yet)
-  - [ ] `updated_at_unix_ms: u64`
-- [ ] Update diagnostics file write timing in app loop:
-  - [ ] Write once immediately after game creation (seed known, initial hash).
-  - [ ] Write after each `app_state.tick(...)` call so latest seed/hash survives crash.
-  - [ ] Use atomic write (`.tmp` file + rename) to avoid partial/corrupt JSON on crash.
-- [ ] Add startup recovery behavior in `crates/app/src/main.rs`:
-  - [ ] On launch, attempt to read `./.game_state/last_run_state.json`.
-  - [ ] If read succeeds, show one-line HUD recovery hint: `Recovered last run: seed=<seed> hash=<hash>`.
-- [ ] Add deterministic test coverage in `crates/app/src/lib.rs` or dedicated app tests:
-  - [ ] JSON roundtrip test for `RunStateFile`.
-  - [ ] Atomic writer test (final file exists and parses; no `.tmp` residue after success).
-  - [ ] Startup recovery parser test for valid + missing file.
-- [ ] Add deterministic test in `crates/core/tests/determinism.rs`:
-  - [ ] For a fixed seed + scripted input policy, final snapshot hash is stable across two identical runs.
+- [x] In `crates/app/src/main.rs`, render `snapshot_hash` in HUD in fixed hex format (16 hex digits).
+- [x] Hash text format is exact `0x` + 16 lowercase hex digits.
+- [x] Add run diagnostics state module in `crates/app/src/run_state_file.rs`.
+- [x] Persist diagnostics to a JSON file at relative path `./.game_state/last_run_state.json`. (Note: Implemented using OS-idiomatic data directory via `directories` crate).
+- [x] Define exact JSON schema (versioned, no optional required fields):
+  - [x] `format_version: 1`
+  - [x] `run_seed: u64`
+  - [x] `snapshot_hash_hex: String` (exactly `0x` + 16 lowercase hex digits)
+  - [x] `tick: u64`
+  - [x] `floor_index: u8`
+  - [x] `branch_profile: String`
+  - [x] `active_god: String` (use `"none"` when no god selected yet)
+  - [x] `updated_at_unix_ms: u64`
+- [x] Update diagnostics file write timing in app loop:
+  - [x] Write once immediately after game creation (seed known, initial hash).
+  - [x] Write after each `app_state.tick(...)` call so latest seed/hash survives crash.
+  - [x] Use atomic write (`.tmp` file + rename) to avoid partial/corrupt JSON on crash.
+- [x] Add startup recovery behavior in `crates/app/src/main.rs`:
+  - [x] On launch, attempt to read `./.game_state/last_run_state.json`.
+  - [x] If read succeeds, show one-line HUD recovery hint: `Recovered last run: seed=<seed> hash=<hash>`.
+- [x] Add deterministic test coverage in `crates/app/src/lib.rs` or dedicated app tests:
+  - [x] JSON roundtrip test for `RunStateFile`.
+  - [x] Atomic writer test (final file exists and parses; no `.tmp` residue after success).
+  - [x] Startup recovery parser test for valid + missing file.
+- [x] Add deterministic test in `crates/core/tests/determinism.rs`:
+  - [x] For a fixed seed + scripted input policy, final snapshot hash is stable across two identical runs.
 **Pass 6c Exit Criteria:**
 - **a) User Experience:** Player can always see current seed/hash and recover last run diagnostics after a crash.
 - **b) Progress toward vision:** Strengthens deterministic repro/debug workflow, including post-crash recovery.
@@ -904,20 +904,20 @@ Execution guardrails for all Milestone 6 passes:
 - **c) Architecture & Maintainability:** Reason-code mapping is centralized and test-covered.
 
 ### Milestone 6e — Frontier Planner Performance Pass (2–3 hrs)
-- [ ] In `crates/core/src/game.rs`, replace per-candidate A* scans in `choose_frontier_intent` with two single-source searches:
-  - [ ] Pass 1: BFS/Dijkstra over discovered walkable tiles avoiding hazards.
-  - [ ] Pass 2: BFS/Dijkstra allowing hazards.
-- [ ] Preserve deterministic neighbor expansion order `Up, Right, Down, Left`.
-- [ ] Preserve current target ranking semantics:
-  - [ ] Lowest path length first
-  - [ ] Tie-break by `(y, x)`
-  - [ ] Closed-door target reason remains `AutoReason::Door`
-  - [ ] Hazard fallback reason remains `AutoReason::ThreatAvoidance`
-- [ ] Keep movement execution pathing logic unchanged (`path_for_intent` still drives actual step path).
-- [ ] Add targeted regression tests in `crates/core/src/game.rs`:
-  - [ ] Safe frontier preferred over hazard frontier.
-  - [ ] Hazard fallback used when only hazard path exists.
-  - [ ] Deterministic tie-break with equal distances remains stable.
+- [x] In `crates/core/src/game.rs`, replace per-candidate A* scans in `choose_frontier_intent` with two single-source searches:
+  - [x] Pass 1: BFS/Dijkstra over discovered walkable tiles avoiding hazards.
+  - [x] Pass 2: BFS/Dijkstra allowing hazards.
+- [x] Preserve deterministic neighbor expansion order `Up, Right, Down, Left`.
+- [x] Preserve current target ranking semantics:
+  - [x] Lowest path length first
+  - [x] Tie-break by `(y, x)`
+  - [x] Closed-door target reason remains `AutoReason::Door`
+  - [x] Hazard fallback reason remains `AutoReason::ThreatAvoidance`
+- [x] Keep movement execution pathing logic unchanged (`path_for_intent` still drives actual step path).
+- [x] Add targeted regression tests in `crates/core/src/game.rs`:
+  - [x] Safe frontier preferred over hazard frontier.
+  - [x] Hazard fallback used when only hazard path exists.
+  - [x] Deterministic tie-break with equal distances remains stable.
 **Pass 6e Exit Criteria:**
 - **a) User Experience:** Auto-explore remains behaviorally consistent while feeling more responsive.
 - **b) Progress toward vision:** Keeps trust in auto policy routing while reducing algorithmic waste.
@@ -940,12 +940,12 @@ Execution guardrails for all Milestone 6 passes:
 - **c) Architecture & Maintainability:** Render path complexity is explicitly `O(MapCells + Entities)` and test-backed.
 
 Milestone 6 task completion checklist:
-- [ ] Refine threat tags and static encounter facts.
-- [ ] Seed display.
-- [ ] Determinism hash.
-- [ ] Persist seed + snapshot hash to `./.game_state/last_run_state.json` with crash-recoverable startup readback.
+- [x] Refine threat tags and static encounter facts.
+- [x] Seed display.
+- [x] Determinism hash.
+- [x] Persist seed + snapshot hash to `./.game_state/last_run_state.json` with crash-recoverable startup readback.
 - [x] Death-recap UI using reason codes from Milestone 3.
-- [ ] Replace repeated per-candidate A* frontier scans with a single-pass BFS/Dijkstra nearest-frontier search.
+- [x] Replace repeated per-candidate A* frontier scans with a single-pass BFS/Dijkstra nearest-frontier search.
 - [ ] Reduce ASCII render complexity from per-cell entity scanning to an `O(MapCells + Entities)` pass (spatial lookup or per-entity overlay pass).
 **Exit Criteria:**
 - **a) User Experience:** Gameplay feels meticulously fair. The player can easily view and recover a run seed/hash and review exact reason codes for their death.
