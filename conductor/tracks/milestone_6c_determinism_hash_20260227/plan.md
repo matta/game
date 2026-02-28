@@ -12,12 +12,12 @@
 - [x] Task: Add unit tests in `crates/app/src/run_state_file.rs` for JSON round-trip and atomic write operations. (31bbd92)
 - [x] Task: Conductor - User Manual Verification 'RunState Diagnostics Module' (Protocol in workflow.md) (8733b6b)
 
-## Phase 3: App Loop Integration & Resume Logic
-- [ ] Task: Update `main.rs` startup logic to resolve the user data directory and check for an existing `last_run_state.json`.
-- [ ] Task: If a state file is found, emit a recovery message to the Event Log on start (using a new `LogEvent` variant).
-- [ ] Task: Implement `R` key resume logic in `main.rs`: if a recovered seed exists, restart the `Game` and reset `AppState` with that seed.
-- [ ] Task: Update the main loop to persist the current game state to `last_run_state.json` after every `app_state.tick(...)` call.
-- [ ] Task: Conductor - User Manual Verification 'App Loop Integration & Resume Logic' (Protocol in workflow.md)
+## Phase 3: App Loop Integration & Resume Logic [checkpoint: 09f2174]
+- [x] Task: Update `main.rs` startup logic to resolve the user data directory and check for an existing `last_run_state.json`. (40db9a0)
+- [x] Task: If a state file is found, emit a recovery message to the Event Log on start (using a new `LogEvent` variant). (40db9a0)
+- [x] Task: Implement `R` key resume logic in `main.rs`: if a recovered seed exists, restart the `Game` and reset `AppState` with that seed. (40db9a0)
+- [x] Task: Update the main loop to persist the current game state to `last_run_state.json` after every `app_state.tick(...)` call. (40db9a0)
+- [x] Task: Conductor - User Manual Verification 'App Loop Integration & Resume Logic' (Protocol in workflow.md) (09f2174)
 
 ## Phase 4: Final Verification & Determinism Check
 - [ ] Task: Add a deterministic integration test in `crates/core/tests/determinism.rs` verifying that identical seeds and policy/inputs produce stable snapshot hashes across two separate runs.
