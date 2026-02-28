@@ -19,11 +19,15 @@
 - [x] Task: Update the main loop to persist the current game state to `last_run_state.json` after every `app_state.tick(...)` call. (40db9a0)
 - [x] Task: Conductor - User Manual Verification 'App Loop Integration & Resume Logic' (Protocol in workflow.md) (09f2174)
 
-## Phase 4: Final Verification & Determinism Check
-- [ ] Task: Add a deterministic integration test in `crates/core/tests/determinism.rs` verifying that identical seeds and policy/inputs produce stable snapshot hashes across two separate runs.
-- [ ] Task: Perform a full manual run to confirm:
-    - [ ] Hash is correctly surfaced.
-    - [ ] `last_run_state.json` is successfully created and updated in the user data directory.
-    - [ ] 'R' key resume correctly restarts with the recovered seed.
-    - [ ] Crash recovery hint appears correctly in the event log.
-- [ ] Task: Conductor - User Manual Verification 'Final Verification & Determinism Check' (Protocol in workflow.md)
+## Phase 4: Final Verification & Determinism Check [checkpoint: 3bc811d]
+- [x] Task: Add a deterministic integration test in `crates/core/tests/determinism.rs` verifying that identical seeds and policy/inputs produce stable snapshot hashes across two separate runs. (4f7387b)
+- [x] Task: Perform a full manual run to confirm: (0f4636f)
+    - [x] Hash is correctly surfaced.
+    - [x] `last_run_state.json` is successfully created and updated in the user data directory.
+    - [x] 'R' key resume correctly restarts with the recovered seed.
+    - [x] Crash recovery hint appears correctly in the event log.
+- [x] Task: Conductor - User Manual Verification 'Final Verification & Determinism Check' (Protocol in workflow.md) (95f8a37)
+
+## Phase 5: Future Work — Testability & Coverage
+- [ ] Task: Refactor `main.rs` logic (startup check, loop persistence, restart handling) into testable components.
+- [ ] Task: Add unit tests for recovery scenarios (missing file, corrupt JSON, valid state recovery, Shift+K trigger).
