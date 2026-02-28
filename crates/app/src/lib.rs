@@ -1,4 +1,5 @@
 pub mod app_loop;
+pub mod run_state_file;
 pub mod seed;
 
 /// Format a seed as an exact decimal string with no prefix or suffix.
