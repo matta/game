@@ -3,7 +3,7 @@
 //! It does not own the gameplay consequences of accepted choices.
 
 use super::*;
-use crate::floor::{BranchProfile, MAX_FLOORS, STARTING_FLOOR_INDEX};
+use crate::mapgen::{BranchProfile, MAX_FLOORS, STARTING_FLOOR_INDEX};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PendingPromptKind {

@@ -4,12 +4,13 @@
 
 use super::*;
 use crate::content::get_enemy_stats;
-use crate::floor::generate_floor;
+use crate::mapgen::MapGenerator;
 use crate::state::{Actor, Item, Map};
 
 impl Game {
     pub(super) fn descend_to_floor(&mut self, floor_index: u8) {
-        let generated = generate_floor(self.seed, floor_index, self.state.branch_profile);
+        let generated =
+            MapGenerator::new(self.seed, self.state.branch_profile).generate(floor_index);
         let mut map = Map::new(generated.width, generated.height);
         map.tiles = generated.tiles;
         map.hazards = generated.hazards;
@@ -63,8 +64,8 @@ mod tests {
 
     use super::*;
     use crate::content::ContentPack;
-    use crate::floor::{BranchProfile, STARTING_FLOOR_INDEX};
     use crate::game::test_support::*;
+    use crate::mapgen::{BranchProfile, STARTING_FLOOR_INDEX};
     use crate::*;
 
     #[test]

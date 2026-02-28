@@ -197,9 +197,9 @@ mod tests {
 
     use super::*;
     use crate::content::{ContentPack, keys};
-    use crate::floor::{BranchProfile, STARTING_FLOOR_INDEX};
     use crate::game::test_support::*;
     use crate::game::visibility::draw_map_diag;
+    use crate::mapgen::{BranchProfile, STARTING_FLOOR_INDEX};
     use crate::*;
 
     #[test]

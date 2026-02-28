@@ -5,7 +5,7 @@
 use std::hash::Hasher;
 
 use super::*;
-use crate::floor::BranchProfile;
+use crate::mapgen::BranchProfile;
 use xxhash_rust::xxh3::Xxh3;
 
 impl Game {

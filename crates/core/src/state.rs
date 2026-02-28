@@ -1,8 +1,10 @@
+//! Runtime world state and storage structures used by the simulation engine.
+
 use std::collections::VecDeque;
 
 use slotmap::SlotMap;
 
-use crate::floor::BranchProfile;
+use crate::mapgen::BranchProfile;
 use crate::types::*;
 
 #[derive(Clone, Debug)]

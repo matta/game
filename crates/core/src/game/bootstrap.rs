@@ -8,7 +8,7 @@ use rand_chacha::rand_core::SeedableRng;
 
 use super::*;
 use crate::content::{ContentPack, get_enemy_stats, keys};
-use crate::floor::{BranchProfile, STARTING_FLOOR_INDEX};
+use crate::mapgen::{BranchProfile, STARTING_FLOOR_INDEX};
 use crate::state::{Actor, Item, Map};
 
 impl Game {

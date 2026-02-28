@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use super::*;
 use crate::content::keys;
-use crate::floor::BranchProfile;
 use crate::game::prompts::PendingPromptKind;
+use crate::mapgen::BranchProfile;
 
 impl Game {
     pub(super) fn effective_player_defense(&self) -> i32 {
