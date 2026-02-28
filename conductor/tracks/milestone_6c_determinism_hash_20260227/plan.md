@@ -5,12 +5,12 @@
 - [x] Task: Verify the HUD stats panel correctly displays the hash on every tick. (851c094)
 - [x] Task: Conductor - User Manual Verification 'Standardize Snapshot Hash HUD Surfacing' (Protocol in workflow.md) (7a67f4d)
 
-## Phase 2: RunState Diagnostics Module
-- [ ] Task: Add `serde`, `serde_json`, and `directories` dependencies to `crates/app/Cargo.toml`.
-- [ ] Task: Implement `RunStateFile` struct in a new module `crates/app/src/run_state_file.rs` with `serde` derivation and the specified schema.
-- [ ] Task: Implement atomic write logic (using a `.tmp` file and `std::fs::rename`) for the `RunStateFile` within the standard OS user data directory.
-- [ ] Task: Add unit tests in `crates/app/src/run_state_file.rs` for JSON round-trip and atomic write operations.
-- [ ] Task: Conductor - User Manual Verification 'RunState Diagnostics Module' (Protocol in workflow.md)
+## Phase 2: RunState Diagnostics Module [checkpoint: 8733b6b]
+- [x] Task: Add `serde`, `serde_json`, and `directories` dependencies to `crates/app/Cargo.toml`. (ed998e3)
+- [x] Task: Implement `RunStateFile` struct in a new module `crates/app/src/run_state_file.rs` with `serde` derivation and the specified schema. (31bbd92)
+- [x] Task: Implement atomic write logic (using a `.tmp` file and `std::fs::rename`) for the `RunStateFile` within the standard OS user data directory. (31bbd92)
+- [x] Task: Add unit tests in `crates/app/src/run_state_file.rs` for JSON round-trip and atomic write operations. (31bbd92)
+- [x] Task: Conductor - User Manual Verification 'RunState Diagnostics Module' (Protocol in workflow.md) (8733b6b)
 
 ## Phase 3: App Loop Integration & Resume Logic
 - [ ] Task: Update `main.rs` startup logic to resolve the user data directory and check for an existing `last_run_state.json`.
