@@ -18,6 +18,7 @@ A deterministic, ASCII-grid roguelike designed for **Roguelike Veterans** who va
 - **Combat Policy Knobs:** A detailed control surface allowing the player to tune their character's behavior (e.g., target priority, stance, retreat thresholds).
 - **Branching Dungeon:** A multi-floor dungeon with a strict one-way descent and meaningful branch choices that alter the run's characteristics.
 - **Deterministic Replays:** The ability to reconstruct any run tick-by-tick from an input journal for verification and balance testing.
+- **Crash-Recoverable Diagnostics:** Automatic persistence of run metadata (seed, hash, tick) enabling immediate run identification and seed-based recovery after a failure.
 
 ## Success Criteria
 - **Replay Verification:** 100% stable replays for all MVP sessions across different builds and platforms.
