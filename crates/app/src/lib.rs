@@ -1,6 +1,13 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub mod app_loop;
 pub mod run_state_file;
 pub mod seed;
+
+/// Get the current system time in milliseconds since the Unix epoch.
+pub fn get_current_unix_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
 
 /// Format a seed as an exact decimal string with no prefix or suffix.
 pub fn format_seed(seed: u64) -> String {

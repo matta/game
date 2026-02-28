@@ -1,6 +1,7 @@
 use app::{
     app_loop::{AppCompletion, AppMode, AppState},
-    format_snapshot_hash,
+    format_snapshot_hash, get_current_unix_ms,
+    run_state_file::RunStateFile,
     seed::{generate_runtime_seed, resolve_seed_from_args},
 };
 use core::{ContentPack, Game, GameMode, Interrupt, LogEvent, Pos, TileKind};
@@ -156,8 +157,26 @@ async fn main() {
     };
     let run_seed = selected_seed.value();
 
+    let diagnostics_path = RunStateFile::get_default_path();
+    let mut recovered_seed = None;
+    let mut recovery_hint = None;
+
+    if let Some(path) = &diagnostics_path {
+        if let Ok(state) = RunStateFile::load(path) {
+            recovered_seed = Some(state.run_seed);
+            recovery_hint = Some(LogEvent::RecoveryHint {
+                seed: state.run_seed,
+                hash_hex: state.snapshot_hash_hex,
+            });
+        }
+    }
+
     let content = ContentPack::default();
     let mut game = Game::new(run_seed, &content, GameMode::Ironman);
+
+    if let Some(hint) = recovery_hint {
+        game.push_log(hint);
+    }
 
     let mut app_state = AppState::default();
 
@@ -200,7 +219,28 @@ async fn main() {
             }
         }
 
+        if is_key_pressed(KeyCode::R) {
+            if let Some(seed) = recovered_seed {
+                game = Game::new(seed, &content, GameMode::Ironman);
+                app_state = AppState::default();
+            }
+        }
+
         app_state.tick(&mut game, &keys_pressed);
+
+        if let Some(path) = &diagnostics_path {
+            let state = RunStateFile {
+                format_version: 1,
+                run_seed: game.seed(),
+                snapshot_hash_hex: format_snapshot_hash(game.snapshot_hash()),
+                tick: game.current_tick(),
+                floor_index: game.state().floor_index,
+                branch_profile: format!("{:?}", game.state().branch_profile),
+                active_god: format!("{:?}", game.state().active_god),
+                updated_at_unix_ms: get_current_unix_ms(),
+            };
+            let _ = state.write_atomic(path);
+        }
 
         let available_size = Size {
             width: AvailableSpace::Definite(screen_width()),
@@ -526,6 +566,9 @@ fn draw_event_log(game: &Game, left: f32, top: f32, line_height: f32) {
             LogEvent::ItemDiscarded { kind: _ } => "discarded item".to_string(),
             LogEvent::EncounterResolved { enemy, fought } => {
                 format!("encounter {:?} resolved fought={}", enemy, fought)
+            }
+            LogEvent::RecoveryHint { seed, hash_hex } => {
+                format!("Recovered last run: seed={} hash={}", seed, hash_hex)
             }
         };
         draw_text(&line, left, top + 20.0 + ((idx + 1) as f32 * line_height), 18.0, LIGHTGRAY);

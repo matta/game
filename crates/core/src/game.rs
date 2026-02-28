@@ -727,8 +727,16 @@ impl Game {
         hasher.finish()
     }
 
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
     pub fn current_tick(&self) -> u64 {
         self.tick
+    }
+
+    pub fn push_log(&mut self, event: LogEvent) {
+        self.log.push(event);
     }
     pub fn request_pause(&mut self) {
         self.pause_requested = true;

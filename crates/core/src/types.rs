@@ -158,6 +158,7 @@ pub enum LogEvent {
     ItemPickedUp { kind: ItemKind },
     ItemDiscarded { kind: ItemKind },
     EncounterResolved { enemy: EntityId, fought: bool },
+    RecoveryHint { seed: u64, hash_hex: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
