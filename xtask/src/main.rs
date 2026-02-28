@@ -16,8 +16,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// Default maximum number of non-comment, non-whitespace tokens allowed per Rust file.
-/// TODO: reduce this limit to 2500.
-const DEFAULT_TOKEN_LIMIT: usize = 5918;
+const DEFAULT_TOKEN_LIMIT: usize = 5200;
 /// Exact clippy lints that repository policy forbids suppressing with `allow`/`expect`.
 ///
 /// We intentionally do **not** enforce this via `cargo clippy ... -F clippy::<lint>` in
