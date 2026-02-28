@@ -173,18 +173,12 @@ async fn main() {
     let mut game = Game::new(run_seed, &content, GameMode::Ironman);
 
     if let Some(path) = &diagnostics_path {
-        game.push_log(LogEvent::RecoveryHint {
-            seed: 0,
-            hash_hex: format!("Logs: {}", path.display()),
-        });
+        game.push_log(LogEvent::Notice(format!("Logs: {}", path.display())));
     }
 
     if let Some(hint) = recovery_hint {
         game.push_log(hint);
-        game.push_log(LogEvent::RecoveryHint {
-            seed: 0,
-            hash_hex: "Press Shift+K to restart with this seed".to_string(),
-        });
+        game.push_log(LogEvent::Notice("Press Shift+K to restart with this seed".to_string()));
     }
 
     let mut app_state = AppState::default();
@@ -236,10 +230,7 @@ async fn main() {
             if let Some(seed) = recovered_seed {
                 game = Game::new(seed, &content, GameMode::Ironman);
                 app_state = AppState::default();
-                game.push_log(LogEvent::RecoveryHint {
-                    seed,
-                    hash_hex: "RESTARTED WITH LAST SEED".to_string(),
-                });
+                game.push_log(LogEvent::Notice(format!("RESTARTED WITH SEED: {}", seed)));
             }
         }
 
@@ -587,6 +578,7 @@ fn draw_event_log(game: &Game, left: f32, top: f32, line_height: f32) {
             LogEvent::RecoveryHint { seed, hash_hex } => {
                 format!("Recovered last run: seed={} hash={}", seed, hash_hex)
             }
+            LogEvent::Notice(msg) => msg.clone(),
         };
         draw_text(&line, left, top + 20.0 + ((idx + 1) as f32 * line_height), 18.0, LIGHTGRAY);
     }
