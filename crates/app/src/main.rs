@@ -172,8 +172,19 @@ async fn main() {
     let content = ContentPack::default();
     let mut game = Game::new(run_seed, &content, GameMode::Ironman);
 
+    if let Some(path) = &diagnostics_path {
+        game.push_log(LogEvent::RecoveryHint {
+            seed: 0,
+            hash_hex: format!("Logs: {}", path.display()),
+        });
+    }
+
     if let Some(hint) = recovery_hint {
         game.push_log(hint);
+        game.push_log(LogEvent::RecoveryHint {
+            seed: 0,
+            hash_hex: "Press Shift+K to restart with this seed".to_string(),
+        });
     }
 
     let mut app_state = AppState::default();
@@ -211,6 +222,7 @@ async fn main() {
             KeyCode::I,
             KeyCode::E,
             KeyCode::G,
+            KeyCode::K,
         ] {
             if is_key_pressed(key) {
                 keys_pressed.push(key);
@@ -218,10 +230,16 @@ async fn main() {
         }
 
         #[allow(clippy::collapsible_if)]
-        if is_key_pressed(KeyCode::R) {
+        if (is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift))
+            && is_key_pressed(KeyCode::K)
+        {
             if let Some(seed) = recovered_seed {
                 game = Game::new(seed, &content, GameMode::Ironman);
                 app_state = AppState::default();
+                game.push_log(LogEvent::RecoveryHint {
+                    seed,
+                    hash_hex: "RESTARTED WITH LAST SEED".to_string(),
+                });
             }
         }
 
