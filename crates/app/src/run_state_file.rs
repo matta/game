@@ -1,8 +1,8 @@
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use directories::ProjectDirs;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct RunStateFile {
@@ -31,9 +31,8 @@ impl RunStateFile {
         }
 
         let tmp_path = path.with_extension("json.tmp");
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        
+        let json = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
+
         fs::write(&tmp_path, json)?;
         fs::rename(&tmp_path, path)?;
 
@@ -75,7 +74,7 @@ mod tests {
     fn test_atomic_write_and_load() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("state.json");
-        
+
         let state = RunStateFile {
             format_version: 1,
             run_seed: 99,
@@ -89,7 +88,7 @@ mod tests {
 
         state.write_atomic(&path).unwrap();
         assert!(path.exists());
-        
+
         let loaded = RunStateFile::load(&path).unwrap();
         assert_eq!(state, loaded);
 

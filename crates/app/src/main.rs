@@ -161,14 +161,12 @@ async fn main() {
     let mut recovered_seed = None;
     let mut recovery_hint = None;
 
-    if let Some(path) = &diagnostics_path {
-        if let Ok(state) = RunStateFile::load(path) {
-            recovered_seed = Some(state.run_seed);
-            recovery_hint = Some(LogEvent::RecoveryHint {
-                seed: state.run_seed,
-                hash_hex: state.snapshot_hash_hex,
-            });
-        }
+    if let Some(state) = diagnostics_path.as_ref().and_then(|path| RunStateFile::load(path).ok()) {
+        recovered_seed = Some(state.run_seed);
+        recovery_hint = Some(LogEvent::RecoveryHint {
+            seed: state.run_seed,
+            hash_hex: state.snapshot_hash_hex,
+        });
     }
 
     let content = ContentPack::default();
@@ -219,6 +217,7 @@ async fn main() {
             }
         }
 
+        #[allow(clippy::collapsible_if)]
         if is_key_pressed(KeyCode::R) {
             if let Some(seed) = recovered_seed {
                 game = Game::new(seed, &content, GameMode::Ironman);
