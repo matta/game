@@ -4,7 +4,7 @@ use crate::game_layout::{FrameLayout, PanelRect};
 use crate::ui_text::{event_log_line, finished_recap_lines, status_text};
 use app::app_loop::{AppMode, AppState};
 use app::format_snapshot_hash;
-use core::{ActorKind, Game, TileKind};
+use core::{ActorKind, Game, GameState, Map, Pos, TileKind};
 use macroquad::prelude::*;
 
 const BORDER_COLOR: Color = Color { r: 0.2, g: 0.2, b: 0.2, a: 1.0 };
@@ -12,6 +12,7 @@ const BORDER_THICKNESS: f32 = 1.0;
 const PANEL_PAD_X: f32 = 15.0;
 const PANEL_PAD_Y: f32 = 25.0;
 const LINE_HEIGHT: f32 = 18.0;
+type OverlayCell = (&'static str, Color);
 
 pub fn draw_frame(game: &Game, app_state: &AppState, run_seed: u64, layout: &FrameLayout) {
     draw_panel_borders(layout);
@@ -164,49 +165,94 @@ fn draw_threat_panel(game: &Game, panel: PanelRect) {
 fn draw_ascii_map(game: &Game, panel: PanelRect) {
     let state = game.state();
     let map = &state.map;
+    let item_overlay = build_item_overlay(state);
+    let actor_overlay = build_actor_overlay(state);
 
     for y in 0..map.internal_height {
         for x in 0..map.internal_width {
-            let position = core::Pos { x: x as i32, y: y as i32 };
+            let position = Pos { x: x as i32, y: y as i32 };
+            let discovered = map.is_discovered(position);
+            let (glyph, final_color) =
+                resolve_cell_render(map, position, &item_overlay, &actor_overlay);
+            let text_x = if discovered {
+                panel.x + PANEL_PAD_X + x as f32 * 11.0
+            } else {
+                panel.x + PANEL_PAD_X + x as f32 * 10.0
+            };
 
-            if !map.is_discovered(position) {
-                draw_text(
-                    " ",
-                    panel.x + PANEL_PAD_X + x as f32 * 10.0,
-                    panel.y + 20.0 + y as f32 * LINE_HEIGHT,
-                    22.0,
-                    LIGHTGRAY,
-                );
-                continue;
-            }
-
-            let mut glyph = tile_glyph(map.tile_at(position));
-            let mut final_color = if map.is_visible(position) { WHITE } else { GRAY };
-
-            for (_, item) in &state.items {
-                if item.pos == position && map.is_visible(position) {
-                    glyph = "!";
-                    final_color = YELLOW;
-                    break;
-                }
-            }
-
-            for (_, actor) in &state.actors {
-                if actor.pos == position && map.is_visible(position) {
-                    (glyph, final_color) = actor_glyph_and_color(actor.kind);
-                    break;
-                }
-            }
-
-            draw_text(
-                glyph,
-                panel.x + PANEL_PAD_X + x as f32 * 11.0,
-                panel.y + 20.0 + y as f32 * LINE_HEIGHT,
-                22.0,
-                final_color,
-            );
+            draw_text(glyph, text_x, panel.y + 20.0 + y as f32 * LINE_HEIGHT, 22.0, final_color);
         }
     }
+}
+
+fn build_item_overlay(state: &GameState) -> Vec<Option<OverlayCell>> {
+    let map = &state.map;
+    let mut overlay = vec![None; map.internal_width * map.internal_height];
+    let mut visible_items: Vec<_> =
+        state.items.values().filter(|item| map.is_visible(item.pos)).collect();
+    visible_items.sort_by_key(|item| (item.pos.y, item.pos.x, item.kind));
+
+    for item in visible_items {
+        if let Some(index) = map_cell_index(map, item.pos) {
+            overlay[index] = Some(("!", YELLOW));
+        }
+    }
+
+    overlay
+}
+
+fn build_actor_overlay(state: &GameState) -> Vec<Option<OverlayCell>> {
+    let map = &state.map;
+    let mut overlay = vec![None; map.internal_width * map.internal_height];
+    let mut visible_actors: Vec<_> =
+        state.actors.values().filter(|actor| map.is_visible(actor.pos)).collect();
+    visible_actors.sort_by_key(|actor| (actor.pos.y, actor.pos.x, actor.kind));
+
+    for actor in visible_actors {
+        if let Some(index) = map_cell_index(map, actor.pos) {
+            overlay[index] = Some(actor_glyph_and_color(actor.kind));
+        }
+    }
+
+    overlay
+}
+
+fn map_cell_index(map: &Map, position: Pos) -> Option<usize> {
+    if map.in_bounds(position) {
+        Some((position.y as usize) * map.internal_width + (position.x as usize))
+    } else {
+        None
+    }
+}
+
+fn resolve_cell_render(
+    map: &Map,
+    position: Pos,
+    item_overlay: &[Option<OverlayCell>],
+    actor_overlay: &[Option<OverlayCell>],
+) -> OverlayCell {
+    if !map.is_discovered(position) {
+        return (" ", LIGHTGRAY);
+    }
+
+    let mut glyph = tile_glyph(map.tile_at(position));
+    let mut final_color = if map.is_visible(position) { WHITE } else { GRAY };
+
+    if map.is_visible(position)
+        && let Some(index) = map_cell_index(map, position)
+    {
+        if let Some((item_glyph, item_color)) = item_overlay.get(index).and_then(|entry| *entry) {
+            glyph = item_glyph;
+            final_color = item_color;
+        }
+        if let Some((actor_glyph, actor_color)) = actor_overlay.get(index).and_then(|entry| *entry)
+        {
+            glyph = actor_glyph;
+            final_color = actor_color;
+        }
+    }
+
+    (glyph, final_color)
 }
 
 fn draw_event_log(game: &Game, panel: PanelRect) {
@@ -248,3 +294,6 @@ fn actor_glyph_and_color(kind: ActorKind) -> (&'static str, Color) {
         ActorKind::AbyssalWarden => ("W", MAGENTA),
     }
 }
+
+#[cfg(test)]
+mod tests;

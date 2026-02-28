@@ -922,21 +922,21 @@ Execution guardrails for all Milestone 6 passes:
 - **b) Progress toward vision:** Keeps trust in auto policy routing while reducing algorithmic waste.
 - **c) Architecture & Maintainability:** Planner complexity drops from repeated A* scans to linear graph passes.
 
-### Milestone 6f — ASCII Render Complexity Pass (1–2 hrs)
-- [ ] In `crates/app/src/main.rs::draw_ascii_map`, remove per-cell scans over all items/actors.
-- [ ] Add one-pass overlay builders:
-  - [ ] `item_overlay` indexed by map cell (`Option<glyph,color>`)
-  - [ ] `actor_overlay` indexed by map cell (`Option<glyph,color>`)
-- [ ] Preserve existing visual precedence:
-  - [ ] Actor glyph overrides item glyph
-  - [ ] Item glyph overrides tile glyph
-- [ ] Keep hidden/undiscovered behavior unchanged.
-- [ ] Add a focused test helper in `crates/app/src/lib.rs` for overlay precedence rules.
-- [ ] Add/adjust app tests to verify overlay precedence deterministically for a synthetic fixture.
+### Milestone 6f — ASCII Render Hygiene Pass (1 hr)
+- [x] In `crates/app/src/ui_render.rs::draw_ascii_map`, remove per-cell scans over all items/actors.
+- [x] Add one-pass overlay builders:
+  - [x] `item_overlay` indexed by map cell (`Option<(glyph, color)>`)
+  - [x] `actor_overlay` indexed by map cell (`Option<(glyph, color)>`)
+- [x] Preserve existing visual precedence and visibility behavior:
+  - [x] Actor glyph overrides item glyph.
+  - [x] Item glyph overrides tile glyph.
+  - [x] Undiscovered cells stay hidden; discovered-but-not-visible cells stay dim.
+- [x] Add focused deterministic helper-level tests in `crates/app/src/ui_render/tests.rs` for precedence and visibility gating.
+- [x] Defer benchmark/FPS telemetry work to post-MVP unless manual playtesting shows real stutter.
 **Pass 6f Exit Criteria:**
-- **a) User Experience:** Rendering remains identical while reducing frame-time work.
-- **b) Progress toward vision:** Supports smooth desktop play during long auto batches.
-- **c) Architecture & Maintainability:** Render path complexity is explicitly `O(MapCells + Entities)` and test-backed.
+- **a) User Experience:** Rendering remains visually identical while removing wasted per-cell entity scans.
+- **b) Progress toward vision:** Keeps MVP momentum by applying only low-risk render hygiene and deferring heavy perf work.
+- **c) Architecture & Maintainability:** Render path is explicitly `O(MapCells + Entities)` and protected by small deterministic tests.
 
 Milestone 6 task completion checklist:
 - [x] Refine threat tags and static encounter facts.
@@ -945,7 +945,7 @@ Milestone 6 task completion checklist:
 - [x] Persist seed + snapshot hash to `./.game_state/last_run_state.json` with crash-recoverable startup readback.
 - [x] Death-recap UI using reason codes from Milestone 3.
 - [x] Replace repeated per-candidate A* frontier scans with a single-pass BFS/Dijkstra nearest-frontier search.
-- [ ] Reduce ASCII render complexity from per-cell entity scanning to an `O(MapCells + Entities)` pass (spatial lookup or per-entity overlay pass).
+- [x] Reduce ASCII render complexity from per-cell entity scanning to an `O(MapCells + Entities)` pass (spatial lookup or per-entity overlay pass).
 **Exit Criteria:**
 - **a) User Experience:** Gameplay feels meticulously fair. The player can easily view and recover a run seed/hash and review exact reason codes for their death.
 - **b) Progress toward vision:** "Lethal-but-fair gameplay" and "No opaque randomness" (Vision 1.4, 8.5) physically realized.
