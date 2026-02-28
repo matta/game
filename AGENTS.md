@@ -3,9 +3,7 @@ Use this as your checklist template for all future tasks. Place it at the **end*
 - [ ] Use @docs/plan.md for planning
 - [ ] Keep @docs/plan.md checkmarks up to date.
 - [ ] Use a TDD approach to implement new features, and fix bugs.
-- [ ] Ensure the following pass with no warnings or errors:
-    - `cargo clippy --all-targets --all-features -- -D warnings`
-    - `cargo test`
-    - `cargo fmt -- --check`
+- [ ] Ensure `make check` passes with no warnings or errors.
+- [ ] Ensure `make test` passes with no failures.
 - [ ] Prefer "Plain English" and jargon-free explanations in documentation, comments, names in code, and commit messages. Exception: technical terms High School students would understand are fine, as are Computer Science terms a university student would understand.
 - [ ] Avoid cryptic variable names; prefer words.
