@@ -54,13 +54,20 @@ async fn main() {
     let content = ContentPack::default();
     let mut current_run_seed = selected_seed.value();
     let mut game = Game::new(current_run_seed, &content, GameMode::Ironman);
-    let mut journal_writer = create_journal_writer(&journal_path, current_run_seed);
+    let (mut journal_writer, preserved_existing_journal) =
+        prepare_startup_journal_writer(&journal_path, current_run_seed);
 
     if let Some(path) = &diagnostics_path {
         game.push_log(LogEvent::Notice(format!("Logs: {}", path.display())));
     }
     if let Some(path) = &journal_path {
         game.push_log(LogEvent::Notice(format!("Journal: {}", path.display())));
+    }
+    if preserved_existing_journal {
+        game.push_log(LogEvent::Notice(
+            "Existing journal preserved. Press Shift+K to replay, or play to start a new journal."
+                .to_string(),
+        ));
     }
     if let Some(hint) = recovery_hint {
         game.push_log(hint);
@@ -105,6 +112,11 @@ async fn main() {
         app_state.tick(&mut game, &frame_input.keys_pressed);
 
         // Flush accepted inputs to the journal file
+        if journal_writer.is_none() && !app_state.accepted_inputs.is_empty() {
+            // We deferred writer creation to avoid truncating a previous run
+            // before the user has a chance to replay it.
+            journal_writer = create_journal_writer(&journal_path, current_run_seed);
+        }
         if let Some(writer) = &mut journal_writer {
             for input in app_state.accepted_inputs.drain(..) {
                 if writer.append(input.tick_boundary, &input.payload).is_err() {
@@ -148,6 +160,25 @@ fn create_journal_writer(path: &Option<PathBuf>, seed: u64) -> Option<JournalWri
             None
         }
     }
+}
+
+/// On startup, preserve an existing non-empty journal so Shift+K replay can
+/// consume it without being truncated by a new run initialization.
+fn prepare_startup_journal_writer(
+    path: &Option<PathBuf>,
+    seed: u64,
+) -> (Option<JournalWriter>, bool) {
+    let Some(path_ref) = path.as_ref() else {
+        return (None, false);
+    };
+
+    if let Ok(loaded) = load_journal_from_file(path_ref)
+        && !loaded.journal.inputs.is_empty()
+    {
+        return (None, true);
+    }
+
+    (create_journal_writer(path, seed), false)
 }
 
 /// Resume appending to an existing journal after replay.
