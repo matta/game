@@ -3,7 +3,9 @@
 mod frame_input;
 mod game_layout;
 mod ui_render;
+mod ui_scale_file;
 mod ui_text;
+mod window_config;
 
 use app::{
     APP_NAME,
@@ -11,6 +13,7 @@ use app::{
     format_snapshot_hash, get_current_unix_ms,
     run_state_file::RunStateFile,
     seed::{generate_runtime_seed, resolve_seed_from_args},
+    ui_scale::clamp_ui_scale,
 };
 use core::{
     ContentPack, Game, GameMode, JournalWriter, LogEvent, load_journal_from_file,
@@ -23,14 +26,11 @@ use macroquad::window::Conf;
 use std::{env, path::PathBuf, process::exit};
 use taffy::TaffyTree;
 use ui_render::draw_frame;
+use ui_scale_file::UiScaleFile;
+use window_config::{build_window_conf, display_scale_notice, runtime_ui_scale};
 
 fn window_conf() -> Conf {
-    Conf {
-        window_title: APP_NAME.to_owned(),
-        window_width: 1000,
-        window_height: 750,
-        ..Default::default()
-    }
+    build_window_conf()
 }
 
 #[macroquad::main(window_conf)]
@@ -49,7 +49,9 @@ async fn main() {
 
     let diagnostics_path = RunStateFile::get_default_path();
     let journal_path = get_journal_path();
+    let ui_scale_path = UiScaleFile::get_default_path();
     let (recovered_seed, recovery_hint) = load_recovery_hint(&diagnostics_path);
+    let persisted_ui_scale = load_persisted_ui_scale(&ui_scale_path);
 
     let content = ContentPack::default();
     let mut current_run_seed = selected_seed.value();
@@ -73,8 +75,13 @@ async fn main() {
         game.push_log(hint);
         game.push_log(LogEvent::Notice("Press Shift+K to replay from last journal".to_string()));
     }
+    game.push_log(LogEvent::Notice(display_scale_notice(persisted_ui_scale)));
+    game.push_log(LogEvent::Notice(
+        "UI scale hotkeys: Ctrl+= larger, Ctrl+- smaller, Ctrl+0 reset".to_string(),
+    ));
 
-    let mut app_state = AppState::default();
+    let mut app_state =
+        AppState { ui_scale: runtime_ui_scale(persisted_ui_scale), ..AppState::default() };
 
     let mut taffy: TaffyTree<()> = TaffyTree::new();
     let layout_nodes = setup_layout(&mut taffy);
@@ -90,7 +97,7 @@ async fn main() {
                 Ok(replayed_game) => {
                     current_run_seed = seed;
                     game = replayed_game;
-                    app_state = AppState::default();
+                    app_state = AppState { ui_scale: app_state.ui_scale, ..AppState::default() };
                     game.push_log(LogEvent::Notice(format!(
                         "REPLAYED journal for seed {seed} — tick {}",
                         game.current_tick()
@@ -101,12 +108,19 @@ async fn main() {
                 Err(reason) => {
                     current_run_seed = seed;
                     game = Game::new(current_run_seed, &content, GameMode::Ironman);
-                    app_state = AppState::default();
+                    app_state = AppState { ui_scale: app_state.ui_scale, ..AppState::default() };
                     journal_writer = create_journal_writer(&journal_path, current_run_seed);
                     game.push_log(LogEvent::Notice(format!("REPLAY INCOMPLETE: {reason}")));
                     game.push_log(LogEvent::Notice(format!("RESTARTED WITH SEED: {seed}")));
                 }
             }
+        }
+
+        if let Some(action) = frame_input.ui_scale_action
+            && app_state.apply_ui_scale_action(action)
+        {
+            persist_ui_scale(&ui_scale_path, app_state.ui_scale);
+            game.push_log(LogEvent::Notice(format!("UI scale set to {:.2}", app_state.ui_scale)));
         }
 
         app_state.tick(&mut game, &frame_input.keys_pressed);
@@ -131,9 +145,24 @@ async fn main() {
 
         let frame_layout =
             compute_frame_layout(&mut taffy, &layout_nodes, screen_width(), screen_height());
-        draw_frame(&game, &app_state, current_run_seed, &frame_layout);
+        draw_frame(&game, &app_state, current_run_seed, &frame_layout, app_state.ui_scale);
 
         next_frame().await
+    }
+}
+
+fn load_persisted_ui_scale(path: &Option<PathBuf>) -> Option<f32> {
+    let path = path.as_ref()?;
+    UiScaleFile::load(path).ok().map(|state| clamp_ui_scale(state.ui_scale))
+}
+
+fn persist_ui_scale(path: &Option<PathBuf>, ui_scale: f32) {
+    let Some(path) = path.as_ref() else {
+        return;
+    };
+    let state = UiScaleFile { format_version: 1, ui_scale: clamp_ui_scale(ui_scale) };
+    if let Err(error) = state.write_atomic(path) {
+        eprintln!("Warning: failed to persist UI scale: {error}");
     }
 }
 

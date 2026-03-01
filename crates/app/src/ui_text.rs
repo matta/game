@@ -2,7 +2,10 @@
 
 use app::app_loop::{AppCompletion, AppMode};
 use app::{engine_failure_code, format_snapshot_hash, reason_code};
-use core::{AutoReason, Game, Interrupt, LogEvent};
+use core::{
+    AutoExploreIntent, AutoReason, BranchProfile, Game, GodId, Interrupt, LogEvent, Policy,
+    WeaponSlot,
+};
 
 pub fn status_text(mode: &AppMode) -> String {
     match mode {
@@ -109,14 +112,129 @@ pub fn event_log_line(event: &LogEvent) -> String {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayerHudSnapshot {
+    pub hp: i32,
+    pub max_hp: i32,
+    pub attack: i32,
+    pub defense: i32,
+    pub speed: u32,
+    pub active_weapon_slot: WeaponSlot,
+    pub equipped_weapon: Option<&'static str>,
+    pub reserve_weapon: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HudSnapshot {
+    pub tick: u64,
+    pub run_seed: u64,
+    pub floor_index: u8,
+    pub branch_profile: BranchProfile,
+    pub active_god: Option<GodId>,
+    pub snapshot_hash: u64,
+    pub auto_intent: Option<AutoExploreIntent>,
+    pub player: PlayerHudSnapshot,
+    pub active_perks: Vec<&'static str>,
+    pub kills_this_floor: u32,
+    pub policy: Policy,
+}
+
+pub fn gather_hud_snapshot(game: &Game, run_seed: u64) -> HudSnapshot {
+    let state = game.state();
+    let player = &state.actors[state.player_id];
+    HudSnapshot {
+        tick: game.current_tick(),
+        run_seed,
+        floor_index: state.floor_index,
+        branch_profile: state.branch_profile,
+        active_god: state.active_god,
+        snapshot_hash: game.snapshot_hash(),
+        auto_intent: state.auto_intent,
+        player: PlayerHudSnapshot {
+            hp: player.hp,
+            max_hp: player.max_hp,
+            attack: player.attack,
+            defense: player.defense,
+            speed: player.speed,
+            active_weapon_slot: player.active_weapon_slot,
+            equipped_weapon: player.equipped_weapon,
+            reserve_weapon: player.reserve_weapon,
+        },
+        active_perks: state.active_perks.clone(),
+        kills_this_floor: state.kills_this_floor,
+        policy: state.policy.clone(),
+    }
+}
+
+pub fn stats_panel_lines_from_snapshot(snapshot: &HudSnapshot) -> Vec<String> {
+    let mut lines = vec![
+        format!("Tick: {}", snapshot.tick),
+        format!("Seed: {}", snapshot.run_seed),
+        format!("Floor: {} / 5", snapshot.floor_index),
+        format!("Branch: {:?}", snapshot.branch_profile),
+        format!("God: {:?}", snapshot.active_god),
+        format!("Hash: {}", format_snapshot_hash(snapshot.snapshot_hash)),
+    ];
+
+    let intent_text = if let Some(intent) = snapshot.auto_intent {
+        format!(
+            "Intent: {:?} target=({}, {}) path_len={}",
+            intent.reason, intent.target.x, intent.target.y, intent.path_len
+        )
+    } else {
+        "Intent: none".to_string()
+    };
+    lines.push(intent_text);
+    lines.push("Level: not tracked yet (planned with XP milestone)".to_string());
+
+    let p = &snapshot.player;
+    lines.push(format!(
+        "HP: {}/{}  ATK: {}  DEF: {}  SPD: {}",
+        p.hp, p.max_hp, p.attack, p.defense, p.speed
+    ));
+    lines.push(format!(
+        "Active Slot: {:?}  Weapon: {}",
+        p.active_weapon_slot,
+        p.equipped_weapon.unwrap_or("None")
+    ));
+    lines.push(format!("Reserve: {}", p.reserve_weapon.unwrap_or("None")));
+
+    let perks = if snapshot.active_perks.is_empty() {
+        "None".to_string()
+    } else {
+        snapshot.active_perks.join(", ")
+    };
+    lines.push(format!("Perks: {}", perks));
+    lines.push(format!("Kills this floor: {}", snapshot.kills_this_floor));
+
+    let policy = &snapshot.policy;
+    let auto_heal_text = policy
+        .auto_heal_if_below_threshold
+        .map(|v| format!("{v}%"))
+        .unwrap_or_else(|| "off".to_string());
+    lines.push(format!(
+        "Policy: stance={:?} retreat_if_hp<= {}% auto_heal={}",
+        policy.stance, policy.retreat_hp_threshold, auto_heal_text
+    ));
+
+    lines
+}
+
+pub fn stats_panel_lines(game: &Game, run_seed: u64) -> Vec<String> {
+    let snapshot = gather_hud_snapshot(game, run_seed);
+    stats_panel_lines_from_snapshot(&snapshot)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        auto_reason_text, completion_reason_code, event_log_line, prompt_text, status_text,
+        HudSnapshot, PlayerHudSnapshot, auto_reason_text, completion_reason_code, event_log_line,
+        prompt_text, stats_panel_lines, stats_panel_lines_from_snapshot, status_text,
     };
     use app::app_loop::{AppCompletion, AppMode};
     use core::{
-        AutoReason, ChoicePromptId, DeathCause, EngineFailureReason, Interrupt, LogEvent, Pos,
+        AutoReason, ChoicePromptId, DeathCause, EngineFailureReason, Interrupt, LogEvent, Policy,
+        Pos, WeaponSlot, content::ContentPack, mapgen::BranchProfile,
     };
 
     #[test]
@@ -186,5 +304,77 @@ mod tests {
     fn completion_reason_reports_damage_death() {
         let completion = AppCompletion::Outcome(core::RunOutcome::Defeat(DeathCause::Damage));
         assert_eq!(completion_reason_code(&completion), "DMG_HP_ZERO");
+    }
+
+    #[test]
+    fn stats_panel_lines_cover_player_and_policy_data() {
+        let content = ContentPack::build_default();
+        let game = core::Game::new(7, &content, core::GameMode::Ironman);
+        let lines = stats_panel_lines(&game, 7);
+
+        assert!(lines.iter().any(|l| l.contains("HP: 20/20")), "expected player HP line");
+        assert!(
+            lines.iter().any(|l| l.contains("Active Slot")),
+            "expected active weapon slot line"
+        );
+        assert!(lines.iter().any(|l| l.contains("Policy:")), "expected policy summary line");
+        assert!(
+            lines.iter().any(|l| l.contains("Level: not tracked yet")),
+            "expected level placeholder line"
+        );
+    }
+
+    #[test]
+    fn stats_panel_lines_update_when_snapshot_changes() {
+        let snapshot = HudSnapshot {
+            tick: 12,
+            run_seed: 99,
+            floor_index: 2,
+            branch_profile: BranchProfile::BranchA,
+            active_god: Some(core::GodId::Veil),
+            snapshot_hash: 12345,
+            auto_intent: None,
+            player: PlayerHudSnapshot {
+                hp: 5,
+                max_hp: 25,
+                attack: 9,
+                defense: 3,
+                speed: 11,
+                active_weapon_slot: WeaponSlot::Reserve,
+                equipped_weapon: Some("weapon_phase_dagger"),
+                reserve_weapon: Some("weapon_rusty_sword"),
+            },
+            active_perks: vec!["perk_scout"],
+            kills_this_floor: 4,
+            policy: Policy {
+                fight_or_avoid: core::FightMode::Fight,
+                stance: core::Stance::Aggressive,
+                target_priority: vec![core::TargetTag::LowestHp],
+                retreat_hp_threshold: 15,
+                auto_heal_if_below_threshold: Some(30),
+                position_intent: core::PositionIntent::AdvanceToMelee,
+                resource_aggression: core::Aggro::Conserve,
+                exploration_mode: core::ExploreMode::Thorough,
+            },
+        };
+
+        let lines = stats_panel_lines_from_snapshot(&snapshot);
+        assert!(
+            lines.iter().any(|l| l.contains("HP: 5/25")),
+            "expected updated hp values to render"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("weapon_phase_dagger")),
+            "expected equipped weapon id to render"
+        );
+        assert!(lines.iter().any(|l| l.contains("perk_scout")), "expected perk list to render");
+        assert!(
+            lines.iter().any(|l| l.contains("Kills this floor: 4")),
+            "expected kill count to render"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("retreat_if_hp<= 15%")),
+            "expected policy thresholds to render"
+        );
     }
 }

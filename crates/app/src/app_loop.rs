@@ -1,3 +1,6 @@
+use crate::ui_scale::{
+    DEFAULT_UI_SCALE, UiScaleAction, decrease_ui_scale, increase_ui_scale, reset_ui_scale,
+};
 use core::journal::InputPayload;
 use core::{AdvanceStopReason, ChoicePromptId, EngineFailureReason, Game, Interrupt, RunOutcome};
 use macroquad::prelude::KeyCode;
@@ -28,17 +31,36 @@ pub enum AppMode {
     Finished(AppCompletion),
 }
 
-#[derive(Default)]
 pub struct AppState {
     pub mode: AppMode,
+    pub ui_scale: f32,
     /// Inputs accepted during the current frame's `tick()` call.
     /// Drained by the caller after each tick to persist to the journal file.
     pub accepted_inputs: Vec<AcceptedInput>,
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self { mode: AppMode::default(), ui_scale: DEFAULT_UI_SCALE, accepted_inputs: Vec::new() }
+    }
+}
+
 impl AppState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn apply_ui_scale_action(&mut self, action: UiScaleAction) -> bool {
+        let next_scale = match action {
+            UiScaleAction::Increase => increase_ui_scale(self.ui_scale),
+            UiScaleAction::Decrease => decrease_ui_scale(self.ui_scale),
+            UiScaleAction::Reset => reset_ui_scale(),
+        };
+        if (next_scale - self.ui_scale).abs() < 0.0001 {
+            return false;
+        }
+        self.ui_scale = next_scale;
+        true
     }
 
     /// Process input and logic for a single frame, returning whether we should continue.
@@ -275,6 +297,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::{AppCompletion, AppMode, AppState};
+    use crate::ui_scale::UiScaleAction;
     use core::{AdvanceStopReason, DeathCause, EngineFailureReason, RunOutcome};
 
     #[test]
@@ -303,5 +326,23 @@ mod tests {
                 AppCompletion::EngineFailure(EngineFailureReason::StalledNoProgress,)
             )
         );
+    }
+
+    #[test]
+    fn ui_scale_actions_support_fractional_steps_and_reset() {
+        let mut app = AppState::new();
+        app.ui_scale = 1.0;
+
+        assert!(app.apply_ui_scale_action(UiScaleAction::Increase));
+        assert!((app.ui_scale - 1.1).abs() < 0.0001);
+
+        assert!(app.apply_ui_scale_action(UiScaleAction::Decrease));
+        assert!((app.ui_scale - 1.0).abs() < 0.0001);
+
+        app.ui_scale = 0.5;
+        assert!(!app.apply_ui_scale_action(UiScaleAction::Decrease));
+        app.ui_scale = 1.6;
+        assert!(app.apply_ui_scale_action(UiScaleAction::Reset));
+        assert!((app.ui_scale - 1.0).abs() < 0.0001);
     }
 }

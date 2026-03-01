@@ -1,5 +1,6 @@
 //! Keyboard input collection for one rendered frame.
 
+use app::ui_scale::UiScaleAction;
 use macroquad::prelude::{KeyCode, is_key_down, is_key_pressed};
 
 const ACTION_KEYS: [KeyCode; 20] = [
@@ -29,6 +30,7 @@ const ACTION_KEYS: [KeyCode; 20] = [
 pub struct FrameInput {
     pub keys_pressed: Vec<KeyCode>,
     pub restart_with_recovered_seed: bool,
+    pub ui_scale_action: Option<UiScaleAction>,
 }
 
 pub fn capture_frame_input() -> FrameInput {
@@ -50,5 +52,16 @@ pub fn capture_frame_input() -> FrameInput {
         || is_key_down(KeyCode::RightShift))
         && is_key_pressed(KeyCode::K);
 
-    FrameInput { keys_pressed, restart_with_recovered_seed }
+    let ctrl_down = is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl);
+    let ui_scale_action = if ctrl_down && is_key_pressed(KeyCode::Equal) {
+        Some(UiScaleAction::Increase)
+    } else if ctrl_down && is_key_pressed(KeyCode::Minus) {
+        Some(UiScaleAction::Decrease)
+    } else if ctrl_down && is_key_pressed(KeyCode::Key0) {
+        Some(UiScaleAction::Reset)
+    } else {
+        None
+    };
+
+    FrameInput { keys_pressed, restart_with_recovered_seed, ui_scale_action }
 }

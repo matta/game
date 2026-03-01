@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod app_loop;
 pub mod run_state_file;
 pub mod seed;
+pub mod ui_scale;
 
 /// Human-readable application name used for window title and data directories.
 pub const APP_NAME: &str = "Roguelike";

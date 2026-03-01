@@ -56,14 +56,18 @@ These remain mandatory unless they actively block fun:
 ### Milestone 0 — Status HUD Foundation
 Goal: make the HUD reflect the data already tracked by the simulation (`GameState::actors`) so players always know their durability and combat posture before the manual-control work begins.
 
-- [ ] Confirm that the player `Actor` (see `crates/core/src/state.rs`) exposes `hp`, `max_hp`, `attack`, `defense`, `active_weapon_slot`, `equipped_weapon`, `reserve_weapon`, and `speed`, and assign them to a coherent HUD row with matched color/spacing.
-- [ ] Show live `hp`/`max_hp` numbers with visual cues whenever they change, relying on the existing actor fields instead of derived heuristics.
-- [ ] Surface auxiliary trackers stored in `GameState` such as `active_perks`, `kills_this_floor`, and `policy` thresholds so their effects (e.g., `PERK_SCOUT` + FOV range) are obvious alongside the health info.
-- [ ] Document that the code currently has no `level`/XP field; keep a placeholder row or note so Milestone D can later populate it once character progression is implemented rather than inventing mock data now.
-- [ ] Add targeted smoke/visual checks that step through actor damage/heal flows to prove the HUD refreshes each metric in real time and update `docs/vision.md` or similar docs to describe where each tracked stat appears.
+- [x] Confirm that the player `Actor` (see `crates/core/src/state.rs`) exposes `hp`, `max_hp`, `attack`, `defense`, `active_weapon_slot`, `equipped_weapon`, `reserve_weapon`, and `speed`, and assign them to a coherent HUD row with matched color/spacing.
+- [x] Show live `hp`/`max_hp` numbers with visual cues whenever they change, relying on the existing actor fields instead of derived heuristics.
+- [x] Surface auxiliary trackers stored in `GameState` such as `active_perks`, `kills_this_floor`, and `policy` thresholds so their effects (e.g., `PERK_SCOUT` + FOV range) are obvious alongside the health info.
+- [x] Document that the code currently has no `level`/XP field; keep a placeholder row or note so Milestone D can later populate it once character progression is implemented rather than inventing mock data now.
+- [x] Add targeted smoke/visual checks that step through actor damage/heal flows to prove the HUD refreshes each metric in real time and update `docs/vision.md` or similar docs to describe where each tracked stat appears.
+- [x] Ensure the stats panel never prints past its visible height; when space is tight, show an explicit overflow line so hidden entries are clear.
+- [x] Enable high-DPI window rendering so UI text keeps expected physical size on Linux HiDPI displays.
+- [x] Add a UI scale fallback path and on-screen scale diagnostics (`dpi` and `GAME_UI_SCALE`) so Linux scaling issues can be debugged and overridden.
+- [x] Add in-app UI scale controls with fractional steps and persistent save/load so Linux users can tune readability without environment variables.
 
 Exit criteria:
-- [ ] Players can glance at the HUD and immediately read their current and max health, combat stats, weapon status, and any perks/kills that impact their posture; the plan also records that level data is pending Milestone D so the HUD can grow into that slot later.
+- [x] Players can glance at the HUD and immediately read their current and max health, combat stats, weapon status, and any perks/kills that impact their posture; the plan also records that level data is pending Milestone D so the HUD can grow into that slot later.
 
 ### Milestone A — Manual Control Baseline
 Goal: make continuous manual play the default experience.

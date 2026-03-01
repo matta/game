@@ -1,4 +1,4 @@
-use super::{map_cell_index, resolve_cell_render};
+use super::{fit_lines_to_panel, map_cell_index, resolve_cell_render};
 use core::{Map, Pos};
 use macroquad::prelude::{GRAY, LIGHTGRAY, RED, YELLOW};
 
@@ -57,4 +57,29 @@ fn hidden_discovered_cell_uses_dim_tile_without_entity_overlay() {
 
     let rendered = resolve_cell_render(&map, position, &item_overlay, &actor_overlay);
     assert_eq!(rendered, (".", GRAY));
+}
+
+#[test]
+fn fit_lines_to_panel_keeps_all_lines_when_space_is_sufficient() {
+    let lines = vec!["Tick".to_string(), "Floor".to_string(), "HP".to_string()];
+    let fitted = fit_lines_to_panel(&lines, 200.0, 15.0, 25.0);
+    assert_eq!(fitted, lines);
+}
+
+#[test]
+fn fit_lines_to_panel_truncates_and_shows_hidden_count() {
+    let lines =
+        vec!["Tick".to_string(), "Seed".to_string(), "Floor".to_string(), "Branch".to_string()];
+
+    let fitted = fit_lines_to_panel(&lines, 70.0, 20.0, 25.0);
+    assert_eq!(fitted.len(), 2);
+    assert_eq!(fitted[0], "Tick");
+    assert_eq!(fitted[1], "... and 3 more");
+}
+
+#[test]
+fn fit_lines_to_panel_returns_empty_when_no_vertical_space() {
+    let lines = vec!["Tick".to_string(), "Seed".to_string()];
+    let fitted = fit_lines_to_panel(&lines, 20.0, 15.0, 25.0);
+    assert!(fitted.is_empty());
 }
