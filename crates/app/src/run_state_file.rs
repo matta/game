@@ -4,6 +4,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::APP_NAME;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct RunStateFile {
     pub format_version: u32,
@@ -18,7 +20,7 @@ pub struct RunStateFile {
 
 impl RunStateFile {
     pub fn get_default_path() -> Option<PathBuf> {
-        ProjectDirs::from("", "", "Roguelike").map(|proj_dirs| {
+        ProjectDirs::from("", "", APP_NAME).map(|proj_dirs| {
             let mut path = proj_dirs.data_dir().to_path_buf();
             path.push("last_run_state.json");
             path

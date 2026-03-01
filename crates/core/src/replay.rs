@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{
     AdvanceStopReason, EngineFailureReason, GameMode, RunOutcome,
     content::ContentPack,
@@ -11,6 +13,19 @@ pub enum ReplayError {
     MissingInput,
     SimulationStalled,
     EngineFailure(EngineFailureReason),
+}
+
+impl fmt::Display for ReplayError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnexpectedInterruption => write!(f, "unexpected interruption during replay"),
+            Self::MissingInput => write!(f, "journal is missing an expected input"),
+            Self::SimulationStalled => write!(f, "simulation stalled during replay"),
+            Self::EngineFailure(reason) => {
+                write!(f, "engine failure during replay: {reason:?}")
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -115,260 +130,94 @@ pub fn replay_to_end(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::journal::InputJournal;
-    use crate::types::{Choice, Interrupt, PolicyUpdate, Stance, TargetTag};
+/// Replay all inputs from a journal and return the reconstructed `Game`.
+///
+/// Unlike `replay_to_end`, this function stops as soon as all journal inputs
+/// have been consumed, returning the game in whatever state it is at that
+/// point (possibly mid-run with an active interrupt or at a pause boundary).
+/// This is the primary mechanism for crash recovery.
+const MAX_REPLAY_INPUT_BATCHES: u32 = 1024;
 
-    const MAX_TEST_RUN_LOOP_COUNT: usize = 512;
+pub fn replay_journal_inputs(
+    content: &ContentPack,
+    journal: &InputJournal,
+) -> Result<Game, ReplayError> {
+    let mut game = Game::new(journal.seed, content, GameMode::Ironman);
+    let inputs = &journal.inputs;
 
-    fn floor_transition_choice(interrupt: &Interrupt) -> Choice {
-        match interrupt {
-            Interrupt::FloorTransition { requires_branch_god_choice, .. } => {
-                if *requires_branch_god_choice {
-                    Choice::DescendBranchAVeil
-                } else {
-                    Choice::Descend
-                }
-            }
-            _ => panic!("expected FloorTransition"),
-        }
+    if inputs.is_empty() {
+        return Ok(game);
     }
 
-    fn floor_transition_forge_choice(interrupt: &Interrupt) -> Choice {
-        match interrupt {
-            Interrupt::FloorTransition { requires_branch_god_choice, .. } => {
-                if *requires_branch_god_choice {
-                    Choice::DescendBranchBForge
-                } else {
-                    Choice::Descend
-                }
-            }
-            _ => panic!("expected FloorTransition"),
+    let mut cursor = 0;
+    let mut batches = 0u32;
+
+    while cursor < inputs.len() {
+        batches += 1;
+        if batches > MAX_REPLAY_INPUT_BATCHES {
+            return Err(ReplayError::SimulationStalled);
         }
-    }
 
-    #[test]
-    fn test_replay_policy_equivalence() {
-        let content = ContentPack::default();
-        let mut game1 = Game::new(777, &content, GameMode::Ironman);
-        let mut journal = InputJournal::new(777);
-
-        // Policy Update at tick 0
-        game1.apply_policy_update(PolicyUpdate::Stance(Stance::Defensive)).unwrap();
-        journal.append_policy_update(0, PolicyUpdate::Stance(Stance::Defensive), 0);
-
-        let mut seq = 1;
-        let mut finished = false;
-        for _ in 0..MAX_TEST_RUN_LOOP_COUNT {
-            let res = game1.advance(100);
-            match res.stop_reason {
-                AdvanceStopReason::Finished(_) => {
-                    finished = true;
-                    break;
-                }
-                AdvanceStopReason::Interrupted(interrupt) => match interrupt {
-                    Interrupt::DoorBlocked { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
-                        journal.append_choice(prompt_id, Choice::OpenDoor, seq);
-                        seq += 1;
-                    }
-                    Interrupt::EnemyEncounter { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::Fight).unwrap();
-                        journal.append_choice(prompt_id, Choice::Fight, seq);
-                        seq += 1;
-                    }
-                    Interrupt::LootFound { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
-                        journal.append_choice(prompt_id, Choice::KeepLoot, seq);
-                        seq += 1;
-                    }
-                    int @ Interrupt::FloorTransition { prompt_id, .. } => {
-                        let choice = floor_transition_choice(&int);
-                        game1.apply_choice(prompt_id, choice.clone()).unwrap();
-                        journal.append_choice(prompt_id, choice, seq);
-                        seq += 1;
-                    }
-                },
-                _ => {}
-            }
+        let batch = game.advance(100);
+        if matches!(batch.stop_reason, AdvanceStopReason::BudgetExhausted)
+            && batch.simulated_ticks == 0
+        {
+            return Err(ReplayError::SimulationStalled);
         }
-        assert!(finished, "test setup did not terminate within bounded batch budget");
 
-        let hash1 = game1.snapshot_hash();
-        let replay_res = replay_to_end(&content, &journal).unwrap();
-
-        assert_eq!(hash1, replay_res.final_snapshot_hash);
-    }
-
-    #[test]
-    fn test_replay_policy_edit_resume_equivalence() {
-        let content = ContentPack::default();
-        let mut game1 = Game::new(1234, &content, GameMode::Ironman);
-        let mut journal = InputJournal::new(1234);
-
-        let mut seq = 0;
-        let mut policy_edited = false;
-
-        let mut finished = false;
-        for _ in 0..MAX_TEST_RUN_LOOP_COUNT {
-            let res = game1.advance(20);
-            match res.stop_reason {
-                AdvanceStopReason::Finished(_) => {
-                    finished = true;
-                    break;
-                }
-                AdvanceStopReason::Interrupted(interrupt) => {
-                    // edit policy during interrupt
-                    if !policy_edited {
-                        game1
-                            .apply_policy_update(PolicyUpdate::TargetPriority(vec![
-                                TargetTag::LowestHp,
-                            ]))
-                            .unwrap();
-                        journal.append_policy_update(
-                            seq,
-                            PolicyUpdate::TargetPriority(vec![TargetTag::LowestHp]),
-                            seq,
-                        );
-                        policy_edited = true;
-                    }
-                    match interrupt {
-                        Interrupt::DoorBlocked { prompt_id, .. } => {
-                            game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
-                            journal.append_choice(prompt_id, Choice::OpenDoor, seq);
-                            seq += 1;
+        match batch.stop_reason {
+            AdvanceStopReason::Finished(_) => return Ok(game),
+            AdvanceStopReason::Interrupted(_) => {
+                // Apply as many inputs as possible at this boundary.
+                while cursor < inputs.len() {
+                    let record = &inputs[cursor];
+                    match &record.payload {
+                        InputPayload::Choice { prompt_id, choice } => {
+                            game.apply_choice(*prompt_id, choice.clone())
+                                .map_err(|_| ReplayError::UnexpectedInterruption)?;
+                            cursor += 1;
+                            break; // Advance again after consuming a choice
                         }
-                        Interrupt::EnemyEncounter { prompt_id, .. } => {
-                            game1.apply_choice(prompt_id, Choice::Fight).unwrap();
-                            journal.append_choice(prompt_id, Choice::Fight, seq);
-                            seq += 1;
+                        InputPayload::PolicyUpdate { update, .. } => {
+                            game.apply_policy_update(update.clone())
+                                .map_err(|_| ReplayError::UnexpectedInterruption)?;
+                            cursor += 1;
                         }
-                        Interrupt::LootFound { prompt_id, .. } => {
-                            game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
-                            journal.append_choice(prompt_id, Choice::KeepLoot, seq);
-                            seq += 1;
-                        }
-                        int @ Interrupt::FloorTransition { prompt_id, .. } => {
-                            let choice = floor_transition_choice(&int);
-                            game1.apply_choice(prompt_id, choice.clone()).unwrap();
-                            journal.append_choice(prompt_id, choice, seq);
-                            seq += 1;
+                        InputPayload::SwapActiveWeapon { .. } => {
+                            game.apply_swap_weapon()
+                                .map_err(|_| ReplayError::UnexpectedInterruption)?;
+                            cursor += 1;
                         }
                     }
                 }
-                _ => {}
             }
-        }
-        assert!(finished, "test setup did not terminate within bounded batch budget");
-
-        let hash1 = game1.snapshot_hash();
-        let replay_res = replay_to_end(&content, &journal).unwrap();
-
-        assert_eq!(hash1, replay_res.final_snapshot_hash);
-    }
-
-    #[test]
-    fn test_replay_swap_weapon_equivalence() {
-        let content = ContentPack::default();
-        let mut game1 = Game::new(777, &content, GameMode::Ironman);
-        let mut journal = InputJournal::new(777);
-
-        // Swap weapon at tick 0 (pause boundary)
-        game1.apply_swap_weapon().unwrap();
-        journal.append_swap_weapon(0, 0);
-
-        let mut seq = 1;
-
-        // Play until end
-        let mut finished = false;
-        for _ in 0..MAX_TEST_RUN_LOOP_COUNT {
-            let res = game1.advance(100);
-            match res.stop_reason {
-                AdvanceStopReason::Finished(_) => {
-                    finished = true;
-                    break;
+            AdvanceStopReason::PausedAtBoundary { .. } => {
+                while cursor < inputs.len() {
+                    let record = &inputs[cursor];
+                    match &record.payload {
+                        InputPayload::PolicyUpdate { update, .. } => {
+                            game.apply_policy_update(update.clone())
+                                .map_err(|_| ReplayError::UnexpectedInterruption)?;
+                            cursor += 1;
+                        }
+                        InputPayload::SwapActiveWeapon { .. } => {
+                            game.apply_swap_weapon()
+                                .map_err(|_| ReplayError::UnexpectedInterruption)?;
+                            cursor += 1;
+                        }
+                        _ => break,
+                    }
                 }
-                AdvanceStopReason::Interrupted(interrupt) => match interrupt {
-                    Interrupt::DoorBlocked { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
-                        journal.append_choice(prompt_id, Choice::OpenDoor, seq);
-                        seq += 1;
-                    }
-                    Interrupt::EnemyEncounter { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::Fight).unwrap();
-                        journal.append_choice(prompt_id, Choice::Fight, seq);
-                        seq += 1;
-                    }
-                    Interrupt::LootFound { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
-                        journal.append_choice(prompt_id, Choice::KeepLoot, seq);
-                        seq += 1;
-                    }
-                    int @ Interrupt::FloorTransition { prompt_id, .. } => {
-                        let choice = floor_transition_choice(&int);
-                        game1.apply_choice(prompt_id, choice.clone()).unwrap();
-                        journal.append_choice(prompt_id, choice, seq);
-                        seq += 1;
-                    }
-                },
-                _ => {}
+            }
+            AdvanceStopReason::BudgetExhausted => {}
+            AdvanceStopReason::EngineFailure(e) => {
+                return Err(ReplayError::EngineFailure(e));
             }
         }
-        assert!(finished, "test setup did not terminate within bounded batch budget");
-
-        let hash1 = game1.snapshot_hash();
-        let replay_res = replay_to_end(&content, &journal).unwrap();
-
-        assert_eq!(hash1, replay_res.final_snapshot_hash);
     }
 
-    #[test]
-    fn test_replay_forge_branch_equivalence() {
-        let content = ContentPack::default();
-        let mut game1 = Game::new(9191, &content, GameMode::Ironman);
-        let mut journal = InputJournal::new(9191);
-        let mut seq = 0;
-
-        let mut finished = false;
-        for _ in 0..MAX_TEST_RUN_LOOP_COUNT {
-            let res = game1.advance(100);
-            match res.stop_reason {
-                AdvanceStopReason::Finished(_) => {
-                    finished = true;
-                    break;
-                }
-                AdvanceStopReason::Interrupted(interrupt) => match interrupt {
-                    Interrupt::DoorBlocked { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::OpenDoor).unwrap();
-                        journal.append_choice(prompt_id, Choice::OpenDoor, seq);
-                        seq += 1;
-                    }
-                    Interrupt::EnemyEncounter { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::Fight).unwrap();
-                        journal.append_choice(prompt_id, Choice::Fight, seq);
-                        seq += 1;
-                    }
-                    Interrupt::LootFound { prompt_id, .. } => {
-                        game1.apply_choice(prompt_id, Choice::KeepLoot).unwrap();
-                        journal.append_choice(prompt_id, Choice::KeepLoot, seq);
-                        seq += 1;
-                    }
-                    int @ Interrupt::FloorTransition { prompt_id, .. } => {
-                        let choice = floor_transition_forge_choice(&int);
-                        game1.apply_choice(prompt_id, choice.clone()).unwrap();
-                        journal.append_choice(prompt_id, choice, seq);
-                        seq += 1;
-                    }
-                },
-                _ => {}
-            }
-        }
-        assert!(finished, "test setup did not terminate within bounded batch budget");
-
-        let hash1 = game1.snapshot_hash();
-        let replay_res = replay_to_end(&content, &journal).unwrap();
-        assert_eq!(hash1, replay_res.final_snapshot_hash);
-    }
+    Ok(game)
 }
+
+#[cfg(test)]
+mod tests;

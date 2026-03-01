@@ -4,6 +4,9 @@ pub mod app_loop;
 pub mod run_state_file;
 pub mod seed;
 
+/// Human-readable application name used for window title and data directories.
+pub const APP_NAME: &str = "Roguelike";
+
 /// Get the current system time in milliseconds since the Unix epoch.
 pub fn get_current_unix_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64

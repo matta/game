@@ -947,24 +947,24 @@ Milestone 6 task completion checklist:
 - **MVP mode decision:** There is no easy mode in MVP.
 
 Execution guardrails for all Milestone 7 passes:
-- [ ] Execute passes strictly in order.
-- [ ] Use TDD in every pass.
-- [ ] Run all check/clippy/test commands with 0 failures after each pass.
+- [x] Execute passes strictly in order.
+- [x] Use TDD in every pass.
+- [x] Run all check/clippy/test commands with 0 failures after each pass.
 
 ### Milestone 7a — Dribbling JSONL Journal + SHA-256 Chain (3–4 hrs)
-- [ ] Implement a file-backed `InputJournal` using `.jsonl`.
-- [ ] Write a header line first: `format_version`, `seed`, `build_id`, `content_hash`.
-- [ ] Append one record per accepted simulation input (`Choice`, `PolicyUpdate`, `SwapActiveWeapon`) with: `seq`, `tick_boundary`, `payload`, `prev_sha256`, `sha256`.
-- [ ] Hash rule: each `sha256` is computed over a canonical serialized record body plus `prev_sha256` so record order/deletion/corruption is detected.
-- [ ] Flush append data immediately after each accepted input mutation.
-- [ ] Add unit tests for schema round-trip, hash-chain verification, and truncated-line handling.
+- [x] Implement a file-backed `InputJournal` using `.jsonl`.
+- [x] Write a header line first: `format_version`, `seed`, `build_id`, `content_hash`.
+- [x] Append one record per accepted simulation input (`Choice`, `PolicyUpdate`, `SwapActiveWeapon`) with: `seq`, `tick_boundary`, `payload`, `prev_sha256`, `sha256`.
+- [x] Hash rule: each `sha256` is computed over a canonical serialized record body plus `prev_sha256` so record order/deletion/corruption is detected.
+- [x] Flush append data immediately after each accepted input mutation.
+- [x] Add unit tests for schema round-trip, hash-chain verification, and truncated-line handling.
 
 ### Milestone 7b — Crash Replay from Journal (3–4 hrs)
-- [ ] Implement headless `load_from_journal` that initializes from header seed and replays records in order.
-- [ ] Verify each line during load/replay (`valid JSON` + `valid SHA-256 chain`).
-- [ ] On first invalid JSON line, incomplete line, or checksum mismatch: stop replay immediately and return an "incomplete replay" error with line index and reason.
-- [ ] Add tests showing valid journal replay equivalence (`same final snapshot_hash`) and corrupted journal fail-fast behavior (`replay stops at first bad line`).
-- [ ] Show a clear user-facing warning/error when replay is incomplete.
+- [x] Implement headless `load_from_journal` that initializes from header seed and replays records in order.
+- [x] Verify each line during load/replay (`valid JSON` + `valid SHA-256 chain`).
+- [x] On first invalid JSON line, incomplete line, or checksum mismatch: stop replay immediately and return an "incomplete replay" error with line index and reason.
+- [x] Add tests showing valid journal replay equivalence (`same final snapshot_hash`) and corrupted journal fail-fast behavior (`replay stops at first bad line`).
+- [x] Show a clear user-facing warning/error when replay is incomplete.
 
 **Exit Criteria:**
 - **a) User Experience:** If the game crashes, the run can be replayed deterministically to the last valid journaled input, with clear messaging when a journal is incomplete or corrupted.
